@@ -189,3 +189,97 @@ export const MAJORS = {
     M('السينما والإخراج', 4, 72.0), M('المسرح والتمثيل', 4, 70.0), M('التربية الفنية', 4, 65.0)
   ]
 };
+
+// ---------- أسئلة التقدير الذكي للإنكليزية (12 سؤالاً — نسخة الموقع) ----------
+export const EF_QUESTIONS = [
+  { q: 'She ___ to work every day.', opts: ['go', 'goes', 'going', 'gone'], a: 1, lvl: 'A1', cat: 'g',
+    expl: 'مع الضمير she/he/it نضيف s للفعل: goes.' },
+  { q: 'I need to ___ a doctor.', opts: ['see', 'watch', 'look', 'meet'], a: 0, lvl: 'A1', cat: 'v',
+    expl: 'التعبير الصحيح لزيارة الطبيب هو see a doctor.' },
+  { q: 'I have lived in Damascus ___ 2010.', opts: ['since', 'for', 'from', 'at'], a: 0, lvl: 'A2', cat: 'g',
+    expl: 'مع نقطة بداية زمنية محددة (2010) نستخدم since.' },
+  { q: 'Choose the correct sentence:', opts: ['He don\'t like tea.', 'He doesn\'t likes tea.', 'He doesn\'t like tea.', 'He not like tea.'], a: 2, lvl: 'A2', cat: 'g',
+    expl: 'بعد doesn\'t يأتي الفعل بصيغة المصدر دون s.' },
+  { q: 'If I ___ rich, I would travel the world.', opts: ['am', 'was', 'were', 'be'], a: 2, lvl: 'B1', cat: 'g',
+    expl: 'في الجمل الشرطية الثانية نستخدم were لجميع الضمائر.' },
+  { q: 'The project was postponed ___ the lack of funds.', opts: ['because', 'due to', 'although', 'despite'], a: 1, lvl: 'B1', cat: 'v',
+    expl: 'قبل الاسم (the lack of funds) نستخدم due to.' },
+  { q: 'By the time we arrived, the movie ___.', opts: ['started', 'has started', 'had started', 'starts'], a: 2, lvl: 'B2', cat: 'g',
+    expl: 'حدث وقع قبل حدث آخر في الماضي: past perfect (had started).' },
+  { q: 'She\'s very ___; she always notices small details.', opts: ['naive', 'arrogant', 'perceptive', 'gullible'], a: 2, lvl: 'B2', cat: 'v',
+    expl: 'perceptive تعني «سريعة الملاحظة» وهي المناسبة للسياق.' },
+  { q: 'Despite the rain, they ___ to complete the marathon.', opts: ['succeeded', 'managed in', 'managed to', 'succeeded for'], a: 2, lvl: 'B2', cat: 'v',
+    expl: 'التعبير الصحيح للنجاح في شيء هو manage to + مصدر.' },
+  { q: 'His argument was so ___ that nobody could refute it.', opts: ['feeble', 'compelling', 'obscure', 'biased'], a: 1, lvl: 'C1', cat: 'v',
+    expl: 'compelling = مقنع جداً. الحجة المقنعة لا يمكن دحضها.' },
+  { q: 'The committee was ___ about the outcome; they could not reach a consensus.', opts: ['adamant', 'reticent', 'divided', 'unanimous'], a: 2, lvl: 'C1', cat: 'v',
+    expl: 'عجزهم عن الوصول لإجماع يعني أنهم منقسمون: divided.' },
+  { q: 'The findings are ___ with previous research, confirming the validity of the results.', opts: ['commensurate', 'consistent', 'coherent', 'comparable'], a: 1, lvl: 'C2', cat: 'r',
+    expl: 'consistent with = متسق مع. النتائج المتفقة تؤكد صحة الدراسة.' }
+];
+
+// مستويات CEFR (نسخة الموقع)
+export const CEFR = [
+  { band: 'A1', min: 0, max: 2, desc: 'مستوى مبتدئ: تفهم كلمات وعبارات مألوفة جداً. تحتاج بناء أساس متين في المفردات والقواعد.' },
+  { band: 'A2', min: 3, max: 4, desc: 'مستوى أساسي: تتواصل بجمل بسيطة في مواقف يومية. بداية جيدة وتحتاج تطوير الاستماع والقراءة.' },
+  { band: 'B1', min: 5, max: 6, desc: 'مستوى متوسط: تفهم النصوص المألوفة وتتحدث عن مواضيع معروفة. جاهز لاختبارات اللغة المتوسطة.' },
+  { band: 'B2', min: 7, max: 8, desc: 'مستوى فوق المتوسط: تتواصل بطلاقة نسبياً وتفهم نصوصاً معقدة. مناسب للدراسة الجامعية.' },
+  { band: 'C1', min: 9, max: 10, desc: 'مستوى متقدم: تستخدم اللغة بمرونة وفعالية. مستوى ممتاز للدراسة والعمل الدولي.' },
+  { band: 'C2', min: 11, max: 12, desc: 'مستوى إتقان: فهم كامل لكل أشكال اللغة. مستوى يقارب اللغة الأم.' }
+];
+
+export const EF_CATS = [
+  { id: 'g', name: 'القواعد', icon: '📐' },
+  { id: 'v', name: 'المفردات', icon: '📚' },
+  { id: 'r', name: 'القراءة', icon: '📖' }
+];
+
+export const EF_SET_URL = 'https://www.efset.org/quick-check/launch/';
+
+// ---------- الأسئلة الشائعة (نسخة الموقع) ----------
+export const FAQ = [
+  {
+    q: '📊 ما هي المفاضلات التي يمكن التقدم لها؟',
+    a: 'تتعدد مسارات التقديم للتعليم الجامعي، ولكلٍّ شروطه وأرصدته ومواعيده:\n\n'
+     + '• **المفاضلة الحكومية العامة:** التقديم على الجامعات الحكومية ضمن المقاعد العامة وفق معدلات القبول الرسمية.\n'
+     + '• **المفاضلة الموازية (الموازي):** مقاعد إضافية برسوم دراسية على الجامعات الحكومية.\n'
+     + '• **الجامعات الخاصة:** قبول مباشر من كل جامعة وفق شروطها الخاصة.\n'
+     + '• **التعليم المفتوح:** برامج مرنة تتيح التعلم دون الحاجة للحضور اليومي.\n'
+     + '• **الجامعة الافتراضية:** تعلّم عن بُعد بمناهج إلكترونية وشهادات معتمدة.\n\n'
+     + 'تُنشر تفاصيل كل مفاضلة تباعاً فور صدور القرارات الرسمية الخاصة بها.'
+  },
+  {
+    q: '🎁 هل الخدمات مجانية؟',
+    a: 'نعم، اختبار البوصلة والتقدير السريع للإنكليزية والاستشارة الأولية مجانية بالكامل، والشهادة الدولية تصدر عبر مسار رسمي من دون رسوم.'
+  },
+  {
+    q: '🎓 كيف أحصل على شهادة الإنكليزية؟',
+    a: 'عبر ثلاث خطوات: تقديرك السريع في البوت أو الموقع، ثم اختبار EF SET الرسمي المجاني، ثم شهادة CEFR الموثقة دولياً والمعتمدة لدى الجامعات وأرباب العمل.'
+  },
+  {
+    q: '📅 متى تتفعّل حاسبة مفاضلة 2026؟',
+    a: 'فور إعلان وزارة التعليم العالي النتائج الرسمية والأرصدة النهائية. اشترك في قناة أخبار مفاضلة 2026 ليصلك التنبيه لحظة الصدور.'
+  },
+  {
+    q: '🎯 ماذا يعني أن معدّلي فوق 80؟',
+    a: 'معدّلك العالي يمنحك أفضلية في المنح الدراسية الممولة؛ انضم إلى قناة المنح لتكون ضمن الأولوية عند الإعلان عن أي منحة ممولة.'
+  },
+  {
+    q: '💬 كيف أتواصل مع المركز؟',
+    a: 'واتساب أو اتصال مباشر على الأرقام الظاهرة في قسم التواصل، أو عبر قنواتنا على واتساب وتيليغرام وإنستغرام.'
+  }
+];
+
+// ---------- بيانات التواصل (نسخة الموقع) ----------
+export const CONTACT = {
+  phones: ['0947627404', '0999278956'],
+  phonesDisplay: ['0947 627 404', '0999 278 956'],
+  whatsapp: '963999278956',
+  waBase: 'https://wa.me/963999278956',
+  site: 'https://altahhan.vercel.app',
+  newsChannel: 'https://whatsapp.com/channel/0029Vb8MZUwBKfhvMzgUyV0p',
+  grantsChannel: 'https://whatsapp.com/channel/0029Vb7yT0jC6ZvagEWWVQ1D',
+  instagram: 'https://www.instagram.com/altahhan_center',
+  facebook: 'https://www.facebook.com/al.tahhancenter',
+  telegram: 'https://t.me/AlTahhanCenter'
+};

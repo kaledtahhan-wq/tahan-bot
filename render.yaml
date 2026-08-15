@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: tahan-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node bot.js
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: WHATSAPP_NUMBER
+        sync: false
