@@ -3,6 +3,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import express from 'express';
 import {
   BRANCHES, CATEGORIES, QUESTIONS, MAJORS,
+  MAJORS_2026, RELEASED_2026,
   EF_QUESTIONS, CEFR, EF_CATS, EF_SET_URL,
   FAQ, CONTACT
 } from './data.js';
@@ -198,14 +199,57 @@ function sendResult(chatId, msgId) {
 }
 
 // ---------- حاسبة المفاضلة (نفس منطق الموقع: متاح + قريب من الحد) ----------
+function mufadalaYear() {
+  return (RELEASED_2026 && Object.keys(MAJORS_2026).length > 0) ? 2026 : 2025;
+}
+
+function mufadalaComingSoon(chatId, msgId) {
+  const text = `📊 **حاسبة المفاضلة 2026**\n\n`
+    + `⏳ **ستُفعَّل عند صدور المفاضلة الرسمية**\n\n`
+    + `حاسبة مفاضلة 2026 ستتفعّل تلقائياً فور إعلان وزارة التعليم العالي النتائج الرسمية ومعدلات القبول النهائية لجميع الجامعات، وسننقل الأرصدة إلى البوت.\n\n`
+    + `اشترك في قناة أخبار مفاضلة 2026 ليصلك التنبيه لحظة الصدور.`;
+  const opt = {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📰 قناة أخبار مفاضلة 2026', url: CONTACT.newsChannel }],
+        [{ text: '🔔 أخبرني عند الصدور', url: `https://wa.me/${WHATSAPP}?text=${encodeURIComponent('مرحباً، أريد أن أعرف عند صدور مفاضلة 2026.')}` }],
+        [{ text: '🏠 الرئيسية', callback_data: 'home' }]
+      ]
+    }
+  };
+  if (msgId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+  } else {
+    bot.sendMessage(chatId, text, opt);
+  }
+}
+
+function startMufadala(chatId, msgId) {
+  const s = getSession(chatId);
+  if (mufadalaYear() === 2026) {
+    s.section = null; s.avg = null; s.step = 'muf_section';
+    const text = `📊 **حاسبة المفاضلة 2026**\n\nاختر فرعك الدراسي:`;
+    if (msgId) {
+      bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+    } else {
+      bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+    }
+  } else {
+    mufadalaComingSoon(chatId, msgId);
+  }
+}
+
 function mufadalaResult(chatId, msgId) {
   const s = getSession(chatId);
-  const all = (MAJORS[s.section] || []).slice().sort((a, b) => b.cutoff - a.cutoff);
+  const year = mufadalaYear();
+  const src = year === 2026 ? MAJORS_2026 : MAJORS;
+  const all = (src[s.section] || []).slice().sort((a, b) => b.cutoff - a.cutoff);
   const avail = all.filter((m) => m.cutoff <= s.avg);
   const near = all.filter((m) => m.cutoff > s.avg && m.cutoff <= s.avg + 2);
 
   let text = '';
-  text += `📊 **حاسبة المفاضلة 2025**\n\n`;
+  text += `📊 **حاسبة المفاضلة ${year}**\n\n`;
   text += `الفرع: **${esc(s.section)}** · معدلك: **${s.avg.toFixed(2)}%**\n\n`;
 
   if (avail.length === 0) {
@@ -226,7 +270,7 @@ function mufadalaResult(chatId, msgId) {
     });
   }
 
-  text += `\n_الأرصدة تقديرية استرشادية مبنية على مفاضلة 2025 وتتغير سنوياً حسب النتيجة الرسمية._`;
+  text += `\n_الأرصدة تقديرية استرشادية مبنية على مفاضلة ${year} وتتغير سنوياً حسب النتيجة الرسمية._`;
 
   const opt = {
     parse_mode: 'Markdown',
@@ -357,14 +401,7 @@ bot.onText(/\/quiz/, (msg) => {
 });
 
 bot.onText(/\/mufadala/, (msg) => {
-  const chatId = msg.chat.id;
-  const s = getSession(chatId);
-  s.section = null; s.avg = null; s.step = 'muf_section';
-  bot.sendMessage(
-    chatId,
-    `📊 **حاسبة المفاضلة 2025**\n\nاختر فرعك الدراسي:`,
-    { parse_mode: 'Markdown', ...branchKeyboard('mbranch') }
-  );
+  startMufadala(msg.chat.id);
 });
 
 bot.onText(/\/english/, (msg) => {
@@ -442,11 +479,14 @@ bot.on('callback_query', async (cb) => {
 
     // ---------- المفاضلة ----------
     if (data === 'start_muf') {
-      s.section = null; s.avg = null; s.step = 'muf_section';
-      await bot.editMessageText('📊 **حاسبة المفاضلة 2025**\n\nاختر فرعك الدراسي:', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+      startMufadala(chatId, msgId);
       return;
     }
     if (data.startsWith('mbranch:')) {
+      if (mufadalaYear() !== 2026) {
+        mufadalaComingSoon(chatId, msgId);
+        return;
+      }
       s.section = data.split(':')[1];
       s.step = 'muf_avg';
       await bot.editMessageText(`فرعك: **${esc(s.section)}**\n\nاكتب معدلك رقماً من 0 إلى 100 (مثال: 88.5):`, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' });
@@ -549,6 +589,11 @@ bot.on('message', (msg) => {
   }
 
   if (s.step === 'muf_avg') {
+    if (mufadalaYear() !== 2026) {
+      s.step = 'idle';
+      mufadalaComingSoon(msg.chat.id);
+      return;
+    }
     if (!isNaN(num) && num >= 0 && num <= 100) {
       s.avg = Math.round(num * 100) / 100;
       mufadalaResult(msg.chat.id);

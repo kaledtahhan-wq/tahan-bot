@@ -190,6 +190,12 @@ export const MAJORS = {
   ]
 };
 
+// 🔧 تفعيل مفاضلة 2026: عند صدور الأرصدة الرسمية من وزارة التعليم العالي،
+// انسخ بياناتها إلى MAJORS_2026 (بنفس بنية MAJORS) واقلب RELEASED_2026 إلى true،
+// وستعمل الحاسبة تلقائياً ببيانات 2026. حالياً تعرض رسالة «ستتفعل عند الصدور».
+export const RELEASED_2026 = false;
+export const MAJORS_2026 = {};
+
 // ---------- أسئلة التقدير الذكي للإنكليزية (12 سؤالاً — نسخة الموقع) ----------
 export const EF_QUESTIONS = [
   { q: 'She ___ to work every day.', opts: ['go', 'goes', 'going', 'gone'], a: 1, lvl: 'A1', cat: 'g',
