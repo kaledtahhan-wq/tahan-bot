@@ -47,6 +47,8 @@ function mainKeyboard() {
         [{ text: '🧭 اختبار البوصلة', callback_data: 'start_quiz' }],
         [{ text: '📊 حاسبة المفاضلة', callback_data: 'start_muf' }],
         [{ text: '🔤 تقدير الإنكليزية (CEFR)', callback_data: 'start_ef' }],
+        [{ text: '🎓 الجامعة الافتراضية', callback_data: 'sec:vu' }, { text: '📚 التعليم المفتوح', callback_data: 'sec:oedu' }],
+        [{ text: '🆓 الدورات المجانية', callback_data: 'sec:fc' }, { text: '📘 منهاج البكلوريا', callback_data: 'sec:bac' }],
         [{ text: '❓ الأسئلة الشائعة', callback_data: 'faq' }],
         [{ text: '📞 تواصل واستشارة', callback_data: 'contact' }, { text: 'ℹ️ عن المركز', callback_data: 'about' }]
       ]
@@ -127,6 +129,57 @@ function homeBtn() {
   };
 }
 
+// ---------- أقسام الموقع (تواكب محتوى الموقع) ----------
+const SECTIONS = {
+  vu: {
+    icon: '🎓',
+    title: 'الجامعة الافتراضية السورية',
+    desc: 'دليل شامل ومرجعي لبرامج الجامعة الافتراضية السورية (SVU): شروط القبول، المقررات، الرسوم الدراسية، ومراكز التسجيل المعتمدة — وتعرّف على التخصصات المتاحة وكيف تسجّل خطوة بخطوة.',
+    url: CONTACT.site + '/virtual-u.html'
+  },
+  oedu: {
+    icon: '📚',
+    title: 'التعليم المفتوح في سوريا',
+    desc: 'كل ما تحتاج معرفته عن نظام التعليم المفتوح: شروط القبول، التخصصات المتاحة، الرسوم، الجامعات المشاركة، والأسئلة الشائعة — بأسلوب مرجعي مبسّط.',
+    url: CONTACT.site + '/open-education.html'
+  },
+  fc: {
+    icon: '🆓',
+    title: 'الدورات المجانية',
+    desc: 'مجموعة دورات مجانية معتمدة في مجالات متنوعة (تنمية الذات، مهارات، لغات وتقنية) مع شهادات وودجت تسجيل عبر واتساب — ابدأ بأي دورة مجاناً.',
+    url: CONTACT.site + '/free-courses.html'
+  },
+  bac: {
+    icon: '📘',
+    title: 'منهاج البكلوريا التفاعلي',
+    desc: 'منهاج تفاعلي يساعد طلاب البكلوريا على تنظيم مذاكرتهم ومتابعة تقدّمهم أسبوعياً. (قريباً على الموقع)',
+    url: CONTACT.site
+  }
+};
+
+function sectionKeyboard(url) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🌐 افتح الصفحة', url }],
+        [{ text: '🏠 الرئيسية', callback_data: 'home' }]
+      ]
+    }
+  };
+}
+
+function sendSection(chatId, msgId, key) {
+  const s = SECTIONS[key];
+  if (!s) return;
+  const text = `${s.icon} **${s.title}**\n\n${s.desc}\n\nالموقع: ${s.url}`;
+  const opt = { parse_mode: 'Markdown', ...sectionKeyboard(s.url) };
+  if (msgId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+  } else {
+    bot.sendMessage(chatId, text, opt);
+  }
+}
+
 // ---------- حساب النتيجة (نفس منطق الموقع) ----------
 function computeResult(answers) {
   const totals = [0, 0, 0, 0, 0];
@@ -183,7 +236,7 @@ function sendResult(chatId, msgId) {
     }
   }
 
-  text += `\n_نتيجة استرشادية لا تغني عن الاستشارة. أرصدة التخصصات قيم تقريبية مبنية على مفاضلة 2025 وتتغير سنوياً._`;
+  text += `\n_هذه نتيجة استرشادية لا تغني عن الاستشارة. أرصدة التخصصات المذكورة قيم تقريبية مبنية على مفاضلة ${year} وتتغير سنوياً حسب النتيجة الرسمية._`;
 
   const opt = {
     parse_mode: 'Markdown',
@@ -206,14 +259,14 @@ function mufadalaYear() {
 function mufadalaComingSoon(chatId, msgId) {
   const text = `📊 **حاسبة المفاضلة 2026**\n\n`
     + `⏳ **ستُفعَّل عند صدور المفاضلة الرسمية**\n\n`
-    + `حاسبة مفاضلة 2026 ستتفعّل تلقائياً فور إعلان وزارة التعليم العالي النتائج الرسمية ومعدلات القبول النهائية لجميع الجامعات، وسننقل الأرصدة إلى البوت.\n\n`
-    + `اشترك في قناة أخبار مفاضلة 2026 ليصلك التنبيه لحظة الصدور.`;
+    + `حاسبة مفاضلة 2026 ستتفعّل تلقائياً فور إعلان وزارة التعليم العالي النتائج الرسمية ومعدلات القبول النهائية لجميع الجامعات.\n\n`
+    + `حالياً يمكنك استخدام حاسبة مفاضلة **2025** للاسترشاد بتخصصاتك المحتملة.`;
   const opt = {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
+        [{ text: '📊 استخدم حاسبة 2025', callback_data: 'muf2025' }],
         [{ text: '📰 قناة أخبار مفاضلة 2026', url: CONTACT.newsChannel }],
-        [{ text: '🔔 أخبرني عند الصدور', url: `https://wa.me/${WHATSAPP}?text=${encodeURIComponent('مرحباً، أريد أن أعرف عند صدور مفاضلة 2026.')}` }],
         [{ text: '🏠 الرئيسية', callback_data: 'home' }]
       ]
     }
@@ -376,6 +429,10 @@ bot.onText(/\/start/, (msg) => {
     + `🧭 اختبار البوصلة لاكتشاف تخصصك الجامعي\n`
     + `📊 حاسبة المفاضلة حسب فرعك ومعدلك\n`
     + `🔤 تقدير مستوى الإنكليزية (مقياس CEFR)\n`
+    + `🎓 الجامعة الافتراضية — دليل البرامج والقبول\n`
+    + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
+    + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
+    + `📘 منهاج البكلوريا التفاعلي\n`
     + `❓ الأسئلة الشائعة والاستشارة المجانية\n\nاختر ما يناسبك 👇`,
     { parse_mode: 'Markdown', ...mainKeyboard() }
   );
@@ -449,6 +506,12 @@ bot.on('callback_query', async (cb) => {
       return;
     }
 
+    // ---------- أقسام الموقع ----------
+    if (data.startsWith('sec:')) {
+      sendSection(chatId, msgId, data.split(':')[1]);
+      return;
+    }
+
     // ---------- البوصلة ----------
     if (data === 'start_quiz') {
       s.section = null; s.avg = null; s.answers = []; s.step = 'quiz_section';
@@ -482,11 +545,12 @@ bot.on('callback_query', async (cb) => {
       startMufadala(chatId, msgId);
       return;
     }
+    if (data === 'muf2025') {
+      s.section = null; s.avg = null; s.step = 'muf_section';
+      await bot.editMessageText('📊 **حاسبة المفاضلة 2025**\n\nاختر فرعك الدراسي:', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+      return;
+    }
     if (data.startsWith('mbranch:')) {
-      if (mufadalaYear() !== 2026) {
-        mufadalaComingSoon(chatId, msgId);
-        return;
-      }
       s.section = data.split(':')[1];
       s.step = 'muf_avg';
       await bot.editMessageText(`فرعك: **${esc(s.section)}**\n\nاكتب معدلك رقماً من 0 إلى 100 (مثال: 88.5):`, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' });
@@ -554,7 +618,11 @@ bot.on('callback_query', async (cb) => {
         `ℹ️ **مركز الطحان**\n\nمركز متخصص في التوجيه الجامعي واستشارات ما بعد الشهادة الثانوية:\n\n`
         + `🧭 اختبار البوصلة لتحديد قطبك المناسب\n`
         + `📊 حاسبة مفاضلة 2025 (و2026 فور صدورها)\n`
-        + `🔤 مسار شهادة إنكليزية معتمدة (EF SET)\n\n`
+        + `🔤 مسار شهادة إنكليزية معتمدة (EF SET)\n`
+        + `🎓 الجامعة الافتراضية — دليل شامل لبرامج SVU والقبول\n`
+        + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
+        + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
+        + `📘 منهاج البكلوريا التفاعلي لتنظيم المذاكرة\n\n`
         + `كل الخدمات مجانية — صدقة جارية. 🌿\n\n`
         + `الموقع: ${CONTACT.site}`,
         { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🌐 افتح الموقع', url: CONTACT.site }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
