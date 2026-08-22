@@ -39,6 +39,11 @@ function catIcon(catIdx) {
   return CATEGORIES[catIdx] ? CATEGORIES[catIdx].icon : '🎓';
 }
 
+// هروب مخفّف لـ Markdown القديم: يهرب _ و ` فقط (بيانات الأسئلة) ويُبقي ** للتسمين
+function md(s) {
+  return String(s).replace(/_/g, '\\_').replace(/`/g, '\\`');
+}
+
 // ---------- أزرار ----------
 function mainKeyboard() {
   return {
@@ -46,7 +51,7 @@ function mainKeyboard() {
       inline_keyboard: [
         [{ text: '🧭 اختبار البوصلة', callback_data: 'start_quiz' }],
         [{ text: '📊 حاسبة المفاضلة', callback_data: 'start_muf' }],
-        [{ text: '🔤 تقدير الإنكليزية (CEFR)', callback_data: 'start_ef' }],
+        [{ text: '🔤 اختبار اللغة الإنكليزية (CEFR)', callback_data: 'start_ef' }],
         [{ text: '🎓 الجامعة الافتراضية', callback_data: 'sec:vu' }, { text: '📚 التعليم المفتوح', callback_data: 'sec:oedu' }],
         [{ text: '🆓 الدورات المجانية', callback_data: 'sec:fc' }, { text: '📘 منهاج البكلوريا', callback_data: 'sec:bac' }],
         [{ text: '❓ الأسئلة الشائعة', callback_data: 'faq' }],
@@ -83,7 +88,7 @@ function optionKeyboard(q) {
 function efOptionKeyboard(q) {
   return {
     reply_markup: {
-      inline_keyboard: q.opts.map((o, i) => [{ text: ['A', 'B', 'C', 'D'][i] + ') ' + o, callback_data: 'eopt:' + i }])
+      inline_keyboard: q.opts.map((o, i) => [{ text: ['A', 'B', 'C', 'D'][i] + ') ' + md(o), callback_data: 'eopt:' + i }])
     }
   };
 }
@@ -353,7 +358,7 @@ function renderEFQuestion(chatId, msgId) {
   const idx = s.efAnswers.length;
   const q = EF_QUESTIONS[idx];
   const c = efCat(q);
-  const text = `🔤 **تقدير الإنكليزية**\n\n**السؤال ${idx + 1} / ${EF_QUESTIONS.length}** · ${c.icon} ${c.name}\n\n${q.q}`;
+  const text = `🔤 **اختبار اللغة الإنكليزية**\n\n**السؤال ${idx + 1} / ${EF_QUESTIONS.length}** · ${c.icon} ${c.name}\n\n${md(q.q)}`;
   if (msgId) {
     bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...efOptionKeyboard(q) });
   } else {
@@ -367,7 +372,7 @@ function efFeedback(chatId, msgId, chosen) {
   const q = EF_QUESTIONS[s.efAnswers.length - 1];
   const correct = chosen === q.a;
   const label = correct ? '✅ **إجابة صحيحة!**' : '❌ **إجابة خاطئة**';
-  const text = `${label}\n\nالإجابة الصحيحة: **${q.opts[q.a]}**\n📝 ${q.expl}`;
+  const text = `${label}\n\nالإجابة الصحيحة: **${md(q.opts[q.a])}**\n📝 ${md(q.expl)}`;
   const isLast = s.efAnswers.length >= EF_QUESTIONS.length;
   const kb = {
     reply_markup: {
@@ -385,10 +390,10 @@ function efResult(chatId, msgId) {
   const level = CEFR.find((c) => score >= c.min && score <= c.max);
 
   let text = '';
-  text += `🎉 **نتيجتك في التقدير السريع**\n\n`;
+  text += `🎉 **نتيجتك في اختبار اللغة الإنكليزية**\n\n`;
   text += `مستواك التقريبي: **${level.band}**\n`;
   text += `✅ أجبت صحيحاً عن **${score} من ${EF_QUESTIONS.length}**\n\n`;
-  text += `${level.desc}\n\n`;
+  text += `${md(level.desc)}\n\n`;
 
   EF_CATS.forEach((c) => {
     const group = EF_QUESTIONS.filter((q) => q.cat === c.id);
@@ -405,7 +410,7 @@ function efResult(chatId, msgId) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '🎓 اختبار EF SET الرسمي', url: EF_SET_URL }],
-        [{ text: '🔁 إعادة التقدير', callback_data: 'ef_go' }, { text: '🏠 الرئيسية', callback_data: 'home' }]
+        [{ text: '🔁 إعادة الاختبار', callback_data: 'ef_go' }, { text: '🏠 الرئيسية', callback_data: 'home' }]
       ]
     }
   };
@@ -428,7 +433,7 @@ bot.onText(/\/start/, (msg) => {
     `أهلاً ${esc(name)} 👋\n\nمرحباً بك في **بوت مركز الطحان** — النسخة الكاملة للموقع داخل تيليغرام:\n\n`
     + `🧭 اختبار البوصلة لاكتشاف تخصصك الجامعي\n`
     + `📊 حاسبة المفاضلة حسب فرعك ومعدلك\n`
-    + `🔤 تقدير مستوى الإنكليزية (مقياس CEFR)\n`
+    + `🔤 اختبار اللغة الإنكليزية (مقياس CEFR)\n`
     + `🎓 الجامعة الافتراضية — دليل البرامج والقبول\n`
     + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
     + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
@@ -441,7 +446,7 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `**الأوامر المتاحة:**\n/start — الصفحة الرئيسية\n/quiz — اختبار البوصلة\n/mufadala — حاسبة المفاضلة\n/english — تقدير الإنكليزية\n/faq — الأسئلة الشائعة\n/contact — التواصل والاستشارة`,
+    `**الأوامر المتاحة:**\n/start — الصفحة الرئيسية\n/quiz — اختبار البوصلة\n/mufadala — حاسبة المفاضلة\n/english — اختبار اللغة الإنكليزية\n/faq — الأسئلة الشائعة\n/contact — التواصل والاستشارة`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -467,10 +472,10 @@ bot.onText(/\/english/, (msg) => {
   s.efAnswers = []; s.step = 'idle';
   bot.sendMessage(
     chatId,
-    `🔤 **تقدير الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
+    `🔤 **اختبار اللغة الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
     {
       parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ التقدير', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] }
+      reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ الاختبار', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] }
     }
   );
 });
@@ -562,8 +567,8 @@ bot.on('callback_query', async (cb) => {
       s.efAnswers = [];
       s.step = 'idle';
       await bot.editMessageText(
-        `🔤 **تقدير الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
-        { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ التقدير', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
+        `🔤 **اختبار اللغة الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
+        { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ الاختبار', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
       );
       return;
     }
@@ -618,7 +623,7 @@ bot.on('callback_query', async (cb) => {
         `ℹ️ **مركز الطحان**\n\nمركز متخصص في التوجيه الجامعي واستشارات ما بعد الشهادة الثانوية:\n\n`
         + `🧭 اختبار البوصلة لتحديد قطبك المناسب\n`
         + `📊 حاسبة مفاضلة 2025 (و2026 فور صدورها)\n`
-        + `🔤 مسار شهادة إنكليزية معتمدة (EF SET)\n`
+        + `🔤 اختبار اللغة الإنكليزية + شهادة EF SET معتمدة\n`
         + `🎓 الجامعة الافتراضية — دليل شامل لبرامج SVU والقبول\n`
         + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
         + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
