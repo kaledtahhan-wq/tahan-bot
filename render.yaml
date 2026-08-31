@@ -10,3 +10,8 @@ services:
         sync: false
       - key: WHATSAPP_NUMBER
         sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: tahan-bot
+          property: url
