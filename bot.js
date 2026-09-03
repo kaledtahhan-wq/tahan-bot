@@ -8,6 +8,19 @@ import {
   FAQ, CONTACT
 } from './data.js';
 
+// ═══════════════════════════════════════════════════════════
+// 1)amelioration handles & crash protection
+// ═══════════════════════════════════════════════════════════
+process.on('unhandledRejection', (err) => {
+  console.error('⚠️ Unhandled rejection:', err?.message || err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught exception:', err?.message || err);
+});
+
+// ═══════════════════════════════════════════════════════════
+// 2) Bot setup
+// ═══════════════════════════════════════════════════════════
 const TOKEN = process.env.BOT_TOKEN;
 if (!TOKEN) {
   console.error('مفقود BOT_TOKEN. أنشئ ملف .env وضع فيه التوكن من @BotFather ثم أعد التشغيل.');
@@ -15,36 +28,105 @@ if (!TOKEN) {
 }
 
 const WHATSAPP = process.env.WHATSAPP_NUMBER || CONTACT.whatsapp;
-
-// وضع التشغيل: webhook على السحابة (Render)، polling محلياً
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 const bot = new TelegramBot(TOKEN, { polling: !RENDER_URL });
 const WEBHOOK_PATH = '/webhook/' + TOKEN;
 
-// حالة الاختبار لكل مستخدم
+// ═══════════════════════════════════════════════════════════
+// 3) Graceful shutdown
+// ═══════════════════════════════════════════════════════════
+function shutdown(signal) {
+  console.log(`🛑 Received ${signal}, shutting down gracefully...`);
+  try { bot.stopPolling(); } catch (_) {}
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// ═══════════════════════════════════════════════════════════
+// 4) Session management with TTL & auto-cleanup
+// ═══════════════════════════════════════════════════════════
+const SESSION_TTL = 30 * 60 * 1000; // 30 minutes
 const sessions = new Map();
 
 function getSession(chatId) {
   if (!sessions.has(chatId)) {
-    sessions.set(chatId, { step: 'idle', section: null, avg: null, answers: [], efAnswers: [] });
+    sessions.set(chatId, {
+      step: 'idle', section: null, avg: null,
+      answers: [], efAnswers: [],
+      ts: Date.now()
+    });
   }
-  return sessions.get(chatId);
+  const s = sessions.get(chatId);
+  s.ts = Date.now();
+  return s;
 }
 
+// Clean expired sessions every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, s] of sessions) {
+    if (now - s.ts > SESSION_TTL) sessions.delete(id);
+  }
+}, 5 * 60 * 1000);
+
+// ═══════════════════════════════════════════════════════════
+// 5) Debounce lock (prevents double-click on buttons)
+// ═══════════════════════════════════════════════════════════
+const locks = new Map();
+function acquireLock(chatId) {
+  if (locks.get(chatId)) return false;
+  locks.set(chatId, true);
+  setTimeout(() => locks.delete(chatId), 800);
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 6) Safe API helpers (catch unhandled rejections)
+// ═══════════════════════════════════════════════════════════
+function safeSend(chatId, text, opt) {
+  return bot.sendMessage(chatId, text, opt).catch((err) => {
+    console.error('sendMessage failed:', err?.message);
+  });
+}
+
+function safeEdit(chatId, msgId, text, opt) {
+  return bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt }).catch((err) => {
+    console.error('editMessageText failed:', err?.message);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 7) Text helpers
+// ═══════════════════════════════════════════════════════════
+// Markdown v1 escaping: only _ * ` [ have special meaning
 function esc(text) {
-  return String(text).replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+  return String(text).replace(/([_*`\[])/g, '\\$1');
+}
+
+function md(s) {
+  return String(s).replace(/([_*`\[])/g, '\\$1');
 }
 
 function catIcon(catIdx) {
   return CATEGORIES[catIdx] ? CATEGORIES[catIdx].icon : '🎓';
 }
 
-// هروب مخفّف لـ Markdown القديم: يهرب _ و ` فقط (بيانات الأسئلة) ويُبقي ** للتسمين
-function md(s) {
-  return String(s).replace(/_/g, '\\_').replace(/`/g, '\\`');
+// Truncate text to stay under Telegram's 4096 char limit
+function truncate(text, maxLen) {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 3) + '...';
 }
 
-// ---------- أزرار ----------
+// Handle Arabic comma (،) and Latin comma for number parsing
+function parseNum(text) {
+  const cleaned = text.replace(/،/g, '.').replace(/,/g, '.');
+  return parseFloat(cleaned);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 8) Keyboards
+// ═══════════════════════════════════════════════════════════
 function mainKeyboard() {
   return {
     reply_markup: {
@@ -134,7 +216,9 @@ function homeBtn() {
   };
 }
 
-// ---------- أقسام الموقع (تواكب محتوى الموقع) ----------
+// ═══════════════════════════════════════════════════════════
+// 9) Website sections
+// ═══════════════════════════════════════════════════════════
 const SECTIONS = {
   vu: {
     icon: '🎓',
@@ -175,27 +259,37 @@ function sectionKeyboard(url) {
 
 function sendSection(chatId, msgId, key) {
   const s = SECTIONS[key];
-  if (!s) return;
+  if (!s) {
+    const text = '⚠️ هذا القسم غير متاح حالياً.';
+    if (msgId) {
+      safeEdit(chatId, msgId, text, homeBtn());
+    } else {
+      safeSend(chatId, text, homeBtn());
+    }
+    return;
+  }
   const text = `${s.icon} **${s.title}**\n\n${s.desc}\n\nالموقع: ${s.url}`;
   const opt = { parse_mode: 'Markdown', ...sectionKeyboard(s.url) };
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+    safeEdit(chatId, msgId, text, opt);
   } else {
-    bot.sendMessage(chatId, text, opt);
+    safeSend(chatId, text, opt);
   }
 }
 
-// ---------- حساب النتيجة (نفس منطق الموقع) ----------
+// ═══════════════════════════════════════════════════════════
+// 10) Quiz engine
+// ═══════════════════════════════════════════════════════════
 function computeResult(answers) {
   const totals = [0, 0, 0, 0, 0];
   answers.forEach((w) => w.forEach((v, j) => { totals[j] += v; }));
   const sum = totals.reduce((a, b) => a + b, 0) || 1;
-  const pcts = totals.map((t2) => Math.round((t2 / sum) * 100));
-  const order = [0, 1, 2, 3, 4].sort((a, b) => pcts[b] - pcts[a]);
+  const pcts = totals.map((t) => Math.round((t / sum) * 100));
+  // Stable sort: preserve original index for equal percentages
+  const order = [0, 1, 2, 3, 4].sort((a, b) => pcts[b] - pcts[a] || a - b);
   return { totals, pcts, top: order[0], second: order[1] };
 }
 
-// ---------- إرسال أسئلة البوصلة ----------
 function askQuestion(chatId, msgId) {
   const s = getSession(chatId);
   const idx = s.answers.length;
@@ -205,9 +299,9 @@ function askQuestion(chatId, msgId) {
   const q = QUESTIONS[idx];
   const text = `🧭 **سؤال ${idx + 1} من ${QUESTIONS.length}**\n\n${q.text}`;
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...optionKeyboard(q) });
+    safeEdit(chatId, msgId, text, { parse_mode: 'Markdown', ...optionKeyboard(q) });
   } else {
-    bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...optionKeyboard(q) });
+    safeSend(chatId, text, { parse_mode: 'Markdown', ...optionKeyboard(q) });
   }
 }
 
@@ -224,7 +318,6 @@ function sendResult(chatId, msgId) {
   text += `**لماذا هذا القطب؟**\n`;
   topCat.why.forEach((x, i) => { text += `${i + 1}. ${x}\n`; });
 
-  // التخصصات المتاحة حسب الفرع والمعدل
   const majorsList = (MAJORS[s.section] || []).filter((m) => m.cat === r.top || m.cat === r.second);
   if (majorsList.length) {
     if (s.avg !== null) {
@@ -243,20 +336,20 @@ function sendResult(chatId, msgId) {
 
   text += `\n_هذه نتيجة استرشادية لا تغني عن الاستشارة. أرصدة التخصصات المذكورة قيم تقريبية مبنية على مفاضلة ${mufadalaYear()} وتتغير سنوياً حسب النتيجة الرسمية._`;
 
-  const opt = {
-    parse_mode: 'Markdown',
-    ...resultKeyboard()
-  };
+  const opt = { parse_mode: 'Markdown', ...resultKeyboard() };
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+    safeEdit(chatId, msgId, truncate(text, 4096), opt);
   } else {
-    bot.sendMessage(chatId, text, opt);
+    safeSend(chatId, truncate(text, 4096), opt);
   }
 
   s.step = 'idle';
+  s.answers = [];
 }
 
-// ---------- حاسبة المفاضلة (نفس منطق الموقع: متاح + قريب من الحد) ----------
+// ═══════════════════════════════════════════════════════════
+// 11) Calculator
+// ═══════════════════════════════════════════════════════════
 function mufadalaYear() {
   return (RELEASED_2026 && Object.keys(MAJORS_2026).length > 0) ? 2026 : 2025;
 }
@@ -277,9 +370,9 @@ function mufadalaComingSoon(chatId, msgId) {
     }
   };
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+    safeEdit(chatId, msgId, text, opt);
   } else {
-    bot.sendMessage(chatId, text, opt);
+    safeSend(chatId, text, opt);
   }
 }
 
@@ -289,9 +382,9 @@ function startMufadala(chatId, msgId) {
     s.section = null; s.avg = null; s.step = 'muf_section';
     const text = `📊 **حاسبة المفاضلة 2026**\n\nاختر فرعك الدراسي:`;
     if (msgId) {
-      bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+      safeEdit(chatId, msgId, text, { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
     } else {
-      bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+      safeSend(chatId, text, { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
     }
   } else {
     mufadalaComingSoon(chatId, msgId);
@@ -341,14 +434,16 @@ function mufadalaResult(chatId, msgId) {
     }
   };
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+    safeEdit(chatId, msgId, truncate(text, 4096), opt);
   } else {
-    bot.sendMessage(chatId, text, opt);
+    safeSend(chatId, truncate(text, 4096), opt);
   }
   s.step = 'idle';
 }
 
-// ---------- تقدير الإنكليزية ----------
+// ═══════════════════════════════════════════════════════════
+// 12) English quiz
+// ═══════════════════════════════════════════════════════════
 function efCat(q) {
   return EF_CATS.find((c) => c.id === q.cat) || EF_CATS[0];
 }
@@ -356,20 +451,26 @@ function efCat(q) {
 function renderEFQuestion(chatId, msgId) {
   const s = getSession(chatId);
   const idx = s.efAnswers.length;
+  if (idx >= EF_QUESTIONS.length) {
+    return efResult(chatId, msgId);
+  }
   const q = EF_QUESTIONS[idx];
   const c = efCat(q);
   const text = `🔤 **اختبار اللغة الإنكليزية**\n\n**السؤال ${idx + 1} / ${EF_QUESTIONS.length}** · ${c.icon} ${c.name}\n\n${md(q.q)}`;
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...efOptionKeyboard(q) });
+    safeEdit(chatId, msgId, text, { parse_mode: 'Markdown', ...efOptionKeyboard(q) });
   } else {
-    bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...efOptionKeyboard(q) });
+    safeSend(chatId, text, { parse_mode: 'Markdown', ...efOptionKeyboard(q) });
   }
   s.step = 'ef_q';
 }
 
 function efFeedback(chatId, msgId, chosen) {
   const s = getSession(chatId);
-  const q = EF_QUESTIONS[s.efAnswers.length - 1];
+  const idx = s.efAnswers.length - 1;
+  if (idx < 0 || idx >= EF_QUESTIONS.length) return;
+  const q = EF_QUESTIONS[idx];
+  if (typeof chosen !== 'number' || chosen < 0 || chosen >= q.opts.length) return;
   const correct = chosen === q.a;
   const label = correct ? '✅ **إجابة صحيحة!**' : '❌ **إجابة خاطئة**';
   const text = `${label}\n\nالإجابة الصحيحة: **${md(q.opts[q.a])}**\n📝 ${md(q.expl)}`;
@@ -381,13 +482,13 @@ function efFeedback(chatId, msgId, chosen) {
         : [[{ text: '▶️ التالي', callback_data: 'ef_next' }]]
     }
   };
-  bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...kb });
+  safeEdit(chatId, msgId, text, { parse_mode: 'Markdown', ...kb });
 }
 
 function efResult(chatId, msgId) {
   const s = getSession(chatId);
   const score = EF_QUESTIONS.reduce((acc, q, i) => acc + (s.efAnswers[i] === q.a ? 1 : 0), 0);
-  const level = CEFR.find((c) => score >= c.min && score <= c.max);
+  const level = CEFR.find((c) => score >= c.min && score <= c.max) || CEFR[0];
 
   let text = '';
   text += `🎉 **نتيجتك في اختبار اللغة الإنكليزية**\n\n`;
@@ -415,99 +516,141 @@ function efResult(chatId, msgId) {
     }
   };
   if (msgId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opt });
+    safeEdit(chatId, msgId, text, opt);
   } else {
-    bot.sendMessage(chatId, text, opt);
+    safeSend(chatId, text, opt);
   }
   s.step = 'idle';
+  s.efAnswers = [];
 }
 
-// ---------- الأوامر ----------
+// ═══════════════════════════════════════════════════════════
+// 13) Command handlers (wrapped with try/catch)
+// ═══════════════════════════════════════════════════════════
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const s = getSession(chatId);
-  s.step = 'idle';
-  const name = msg.from.first_name || 'صديقي';
-  bot.sendMessage(
-    chatId,
-    `أهلاً ${esc(name)} 👋\n\nمرحباً بك في **بوت مركز الطحان** — النسخة الكاملة للموقع داخل تيليغرام:\n\n`
-    + `🧭 اختبار البوصلة لاكتشاف تخصصك الجامعي\n`
-    + `📊 حاسبة المفاضلة حسب فرعك ومعدلك\n`
-    + `🔤 اختبار اللغة الإنكليزية (مقياس CEFR)\n`
-    + `🎓 الجامعة الافتراضية — دليل البرامج والقبول\n`
-    + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
-    + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
-    + `📘 منهاج البكلوريا التفاعلي\n`
-    + `❓ الأسئلة الشائعة والاستشارة المجانية\n\nاختر ما يناسبك 👇`,
-    { parse_mode: 'Markdown', ...mainKeyboard() }
-  );
+  try {
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
+    s.step = 'idle';
+    const name = (msg.from?.first_name) || 'صديقي';
+    safeSend(
+      chatId,
+      `أهلاً ${esc(name)} 👋\n\nمرحباً بك في **بوت مركز الطحان** — النسخة الكاملة للموقع داخل تيليغرام:\n\n`
+      + `🧭 اختبار البوصلة لاكتشاف تخصصك الجامعي\n`
+      + `📊 حاسبة المفاضلة حسب فرعك ومعدلك\n`
+      + `🔤 اختبار اللغة الإنكليزية (مقياس CEFR)\n`
+      + `🎓 الجامعة الافتراضية — دليل البرامج والقبول\n`
+      + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
+      + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
+      + `📘 منهاج البكلوريا التفاعلي\n`
+      + `❓ الأسئلة الشائعة والاستشارة المجانية\n\nاختر ما يناسبك 👇`,
+      { parse_mode: 'Markdown', ...mainKeyboard() }
+    );
+  } catch (err) {
+    console.error('/start error:', err.message);
+  }
 });
 
 bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    `**الأوامر المتاحة:**\n/start — الصفحة الرئيسية\n/quiz — اختبار البوصلة\n/mufadala — حاسبة المفاضلة\n/english — اختبار اللغة الإنكليزية\n/faq — الأسئلة الشائعة\n/contact — التواصل والاستشارة`,
-    { parse_mode: 'Markdown' }
-  );
+  try {
+    safeSend(
+      msg.chat.id,
+      `**الأوامر المتاحة:**\n/start — الصفحة الرئيسية\n/quiz — اختبار البوصلة\n/mufadala — حاسبة المفاضلة\n/english — اختبار اللغة الإنكليزية\n/faq — الأسئلة الشائعة\n/contact — التواصل والاستشارة`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    console.error('/help error:', err.message);
+  }
 });
 
 bot.onText(/\/quiz/, (msg) => {
-  const chatId = msg.chat.id;
-  const s = getSession(chatId);
-  s.section = null; s.avg = null; s.answers = []; s.step = 'quiz_section';
-  bot.sendMessage(
-    chatId,
-    `🧭 **اختبار البوصلة**\n\nقبل أن نبدأ، أخبرني: ما فرعك في الثانوية؟`,
-    { parse_mode: 'Markdown', ...branchKeyboard('qbranch') }
-  );
+  try {
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
+    s.section = null; s.avg = null; s.answers = []; s.step = 'quiz_section';
+    safeSend(
+      chatId,
+      `🧭 **اختبار البوصلة**\n\nقبل أن نبدأ، أخبرني: ما فرعك في الثانوية؟`,
+      { parse_mode: 'Markdown', ...branchKeyboard('qbranch') }
+    );
+  } catch (err) {
+    console.error('/quiz error:', err.message);
+  }
 });
 
 bot.onText(/\/mufadala/, (msg) => {
-  startMufadala(msg.chat.id);
+  try {
+    startMufadala(msg.chat.id);
+  } catch (err) {
+    console.error('/mufadala error:', err.message);
+  }
 });
 
 bot.onText(/\/english/, (msg) => {
-  const chatId = msg.chat.id;
-  const s = getSession(chatId);
-  s.efAnswers = []; s.step = 'idle';
-  bot.sendMessage(
-    chatId,
-    `🔤 **اختبار اللغة الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ الاختبار', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] }
-    }
-  );
+  try {
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
+    s.efAnswers = []; s.step = 'idle';
+    safeSend(
+      chatId,
+      `🔤 **اختبار اللغة الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ الاختبار', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] }
+      }
+    );
+  } catch (err) {
+    console.error('/english error:', err.message);
+  }
 });
 
 bot.onText(/\/faq/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    `❓ **الأسئلة الشائعة**\n\nاختر سؤالاً:`,
-    { parse_mode: 'Markdown', ...faqKeyboard() }
-  );
+  try {
+    safeSend(
+      msg.chat.id,
+      `❓ **الأسئلة الشائعة**\n\nاختر سؤالاً:`,
+      { parse_mode: 'Markdown', ...faqKeyboard() }
+    );
+  } catch (err) {
+    console.error('/faq error:', err.message);
+  }
 });
 
 bot.onText(/\/contact/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    `📞 **تواصل معنا**\n\nفريق مركز الطحان جاهز يجاوب عن أسئلتك ويأخذ معك استشارة مجانية — واتساب أو اتصال.\n\n`
-    + `📱 ${CONTACT.phonesDisplay[0]} — ${CONTACT.phonesDisplay[1]}`,
-    { parse_mode: 'Markdown', ...contactKeyboard() }
-  );
+  try {
+    safeSend(
+      msg.chat.id,
+      `📞 **تواصل معنا**\n\nفريق مركز الطحان جاهز يجاوب عن أسئلتك ويأخذ معك استشارة مجانية — واتساب أو اتصال.\n\n`
+      + `📱 ${CONTACT.phonesDisplay[0]} — ${CONTACT.phonesDisplay[1]}`,
+      { parse_mode: 'Markdown', ...contactKeyboard() }
+    );
+  } catch (err) {
+    console.error('/contact error:', err.message);
+  }
 });
 
-// ---------- المعالجات ----------
+// ═══════════════════════════════════════════════════════════
+// 14) Callback query handler
+// ═══════════════════════════════════════════════════════════
 bot.on('callback_query', async (cb) => {
-  const chatId = cb.message.chat.id;
-  const msgId = cb.message.message_id;
+  const chatId = cb.message?.chat?.id;
+  const msgId = cb.message?.message_id;
   const data = cb.data || '';
+  if (!chatId || !msgId) return;
+
+  // Debounce: prevent double-click
+  if (!acquireLock(chatId)) {
+    bot.answerCallbackQuery(cb.id).catch(() => {});
+    return;
+  }
+
   const s = getSession(chatId);
 
   try {
+    // ---------- الرئيسية ----------
     if (data === 'home') {
       s.step = 'idle';
-      await bot.editMessageText('مرحباً بك في **بوت مركز الطحان** 👋\n\nماذا تريد أن تفعل؟', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...mainKeyboard() });
+      await safeEdit(chatId, msgId, 'مرحباً بك في **بوت مركز الطحان** 👋\n\nماذا تريد أن تفعل؟', { parse_mode: 'Markdown', ...mainKeyboard() });
       return;
     }
 
@@ -520,27 +663,28 @@ bot.on('callback_query', async (cb) => {
     // ---------- البوصلة ----------
     if (data === 'start_quiz') {
       s.section = null; s.avg = null; s.answers = []; s.step = 'quiz_section';
-      await bot.editMessageText('🧭 **اختبار البوصلة**\n\nما فرعك في الثانوية؟', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...branchKeyboard('qbranch') });
+      await safeEdit(chatId, msgId, '🧭 **اختبار البوصلة**\n\nما فرعك في الثانوية؟', { parse_mode: 'Markdown', ...branchKeyboard('qbranch') });
       return;
     }
     if (data.startsWith('qbranch:')) {
       s.section = data.split(':')[1];
       s.step = 'quiz_avg';
-      await bot.editMessageText(`فرعك: **${esc(s.section)}**\n\nإذا كنت تعرف معدلك، اكتبه رقماً (مثال: 88.5) — أو اضغط تخطي إذا لم تكن متأكداً.`, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...avgKeyboard() });
+      await safeEdit(chatId, msgId, `فرعك: **${esc(s.section)}**\n\nإذا كنت تعرف معدلك، اكتبه رقماً (مثال: 88.5) — أو اضغط تخطي إذا لم تكن متأكداً.`, { parse_mode: 'Markdown', ...avgKeyboard() });
       return;
     }
     if (data === 'avg_skip') {
       s.avg = null;
       s.step = 'quiz_q';
-      await bot.editMessageText('تمام، نبدأ! 🔥\n\nأجب بصدق دون تفكير طويل — اختر ما يصفك فعلاً، لا ما يتوقعه المجتمع.', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' });
+      await safeEdit(chatId, msgId, 'تمام، نبدأ! 🔥\n\nأجب بصدق دون تفكير طويل — اختر ما يصفك فعلاً، لا ما يتوقعه المجتمع.', { parse_mode: 'Markdown' });
       askQuestion(chatId);
       return;
     }
     if (data.startsWith('opt:')) {
       const idx = s.answers.length;
+      if (idx >= QUESTIONS.length) return;
       const optIdx = parseInt(data.split(':')[1], 10);
-      const q = QUESTIONS[idx];
-      if (q) s.answers.push(q.options[optIdx].w);
+      if (isNaN(optIdx) || optIdx < 0 || optIdx >= QUESTIONS[idx].options.length) return;
+      s.answers.push(QUESTIONS[idx].options[optIdx].w);
       askQuestion(chatId, msgId);
       return;
     }
@@ -552,13 +696,13 @@ bot.on('callback_query', async (cb) => {
     }
     if (data === 'muf2025') {
       s.section = null; s.avg = null; s.step = 'muf_section';
-      await bot.editMessageText('📊 **حاسبة المفاضلة 2025**\n\nاختر فرعك الدراسي:', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+      await safeEdit(chatId, msgId, '📊 **حاسبة المفاضلة 2025**\n\nاختر فرعك الدراسي:', { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
       return;
     }
     if (data.startsWith('mbranch:')) {
       s.section = data.split(':')[1];
       s.step = 'muf_avg';
-      await bot.editMessageText(`فرعك: **${esc(s.section)}**\n\nاكتب معدلك رقماً من 0 إلى 100 (مثال: 88.5):`, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' });
+      await safeEdit(chatId, msgId, `فرعك: **${esc(s.section)}**\n\nاكتب معدلك رقماً من 0 إلى 100 (مثال: 88.5):`, { parse_mode: 'Markdown' });
       return;
     }
 
@@ -566,9 +710,10 @@ bot.on('callback_query', async (cb) => {
     if (data === 'start_ef') {
       s.efAnswers = [];
       s.step = 'idle';
-      await bot.editMessageText(
+      await safeEdit(
+        chatId, msgId,
         `🔤 **اختبار اللغة الإنكليزية — مجاناً**\n\nأجب عن ${EF_QUESTIONS.length} أسئلة بتغذية راجعة فورية لتعرف مستواك التقريبي على مقياس CEFR من A1 إلى C2، ثم أكمل اختبار EF SET الرسمي المجاني للحصول على شهادة معتمدة دولياً.\n\nابدأ الآن 👇`,
-        { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ الاختبار', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🚀 ابدأ الاختبار', callback_data: 'ef_go' }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
       );
       return;
     }
@@ -580,9 +725,10 @@ bot.on('callback_query', async (cb) => {
     }
     if (data.startsWith('eopt:')) {
       const chosen = parseInt(data.split(':')[1], 10);
+      if (isNaN(chosen) || chosen < 0 || chosen > 3) return;
       const idx = s.efAnswers.length;
-      const q = EF_QUESTIONS[idx];
-      if (q) s.efAnswers.push(chosen);
+      if (idx >= EF_QUESTIONS.length) return;
+      s.efAnswers.push(chosen);
       efFeedback(chatId, msgId, chosen);
       return;
     }
@@ -597,29 +743,30 @@ bot.on('callback_query', async (cb) => {
 
     // ---------- الأسئلة الشائعة ----------
     if (data === 'faq') {
-      await bot.editMessageText('❓ **الأسئلة الشائعة**\n\nاختر سؤالاً:', { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...faqKeyboard() });
+      await safeEdit(chatId, msgId, '❓ **الأسئلة الشائعة**\n\nاختر سؤالاً:', { parse_mode: 'Markdown', ...faqKeyboard() });
       return;
     }
     if (data.startsWith('faq:')) {
       const n = parseInt(data.split(':')[1], 10);
+      if (isNaN(n) || n < 1 || n > FAQ.length) return;
       const f = FAQ[n - 1];
-      if (f) {
-        await bot.editMessageText(`❓ ${f.q}\n\n${f.a}`, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...homeBtn() });
-      }
+      await safeEdit(chatId, msgId, `❓ ${f.q}\n\n${f.a}`, { parse_mode: 'Markdown', ...homeBtn() });
       return;
     }
 
     // ---------- تواصل / عن المركز ----------
     if (data === 'contact') {
-      await bot.editMessageText(
+      await safeEdit(
+        chatId, msgId,
         `📞 **تواصل معنا**\n\nفريق مركز الطحان جاهز يجاوب عن أسئلتك ويأخذ معك استشارة مجانية — واتساب أو اتصال.\n\n`
         + `📱 ${CONTACT.phonesDisplay[0]} — ${CONTACT.phonesDisplay[1]}`,
-        { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...contactKeyboard() }
+        { parse_mode: 'Markdown', ...contactKeyboard() }
       );
       return;
     }
     if (data === 'about') {
-      await bot.editMessageText(
+      await safeEdit(
+        chatId, msgId,
         `ℹ️ **مركز الطحان**\n\nمركز متخصص في التوجيه الجامعي واستشارات ما بعد الشهادة الثانوية:\n\n`
         + `🧭 اختبار البوصلة لتحديد قطبك المناسب\n`
         + `📊 حاسبة مفاضلة 2025 (و2026 فور صدورها)\n`
@@ -630,56 +777,74 @@ bot.on('callback_query', async (cb) => {
         + `📘 منهاج البكلوريا التفاعلي لتنظيم المذاكرة\n\n`
         + `كل الخدمات مجانية — صدقة جارية. 🌿\n\n`
         + `الموقع: ${CONTACT.site}`,
-        { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🌐 افتح الموقع', url: CONTACT.site }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🌐 افتح الموقع', url: CONTACT.site }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
       );
       return;
     }
   } catch (err) {
     console.error('callback error:', err.message);
+    bot.answerCallbackQuery(cb.id, { text: 'حدث خطأ، حاول مرة أخرى.', show_alert: false }).catch(() => {});
   } finally {
     bot.answerCallbackQuery(cb.id).catch(() => {});
   }
 });
 
-// قبول المعدل كنص (يأتي بعد اختيار الفرع في البوصلة أو المفاضلة)
+// ═══════════════════════════════════════════════════════════
+// 15) Message handler (average input)
+// ═══════════════════════════════════════════════════════════
 bot.on('message', (msg) => {
-  if (!msg.text) return;
-  if (msg.text.startsWith('/')) return;
-  const s = getSession(msg.chat.id);
-  const num = parseFloat(msg.text.replace(',', '.'));
+  try {
+    if (!msg.text) return;
+    if (msg.text.startsWith('/')) return;
+    const s = getSession(msg.chat.id);
+    const num = parseNum(msg.text);
 
-  if (s.step === 'quiz_avg') {
-    if (!isNaN(num) && num >= 0 && num <= 100) {
-      s.avg = Math.round(num * 100) / 100;
-      s.answers = [];
-      s.step = 'quiz_q';
-      bot.sendMessage(msg.chat.id, `معدلك: **${s.avg}%** 🎯\n\nأجب بصدق على الأسئلة التالية:`, { parse_mode: 'Markdown' });
-      askQuestion(msg.chat.id);
-    } else {
-      bot.sendMessage(msg.chat.id, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5)، أو اضغط «تخطي».');
-    }
-    return;
-  }
-
-  if (s.step === 'muf_avg') {
-    if (mufadalaYear() !== 2026) {
-      s.step = 'idle';
-      mufadalaComingSoon(msg.chat.id);
+    if (s.step === 'quiz_avg') {
+      if (!isNaN(num) && num >= 0 && num <= 100) {
+        s.avg = Math.round(num * 100) / 100;
+        s.answers = [];
+        s.step = 'quiz_q';
+        safeSend(msg.chat.id, `معدلك: **${s.avg}%** 🎯\n\nأجب بصدق على الأسئلة التالية:`, { parse_mode: 'Markdown' });
+        askQuestion(msg.chat.id);
+      } else {
+        safeSend(msg.chat.id, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5)، أو اضغط «تخطي».');
+      }
       return;
     }
-    if (!isNaN(num) && num >= 0 && num <= 100) {
-      s.avg = Math.round(num * 100) / 100;
-      mufadalaResult(msg.chat.id);
-    } else {
-      bot.sendMessage(msg.chat.id, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5).');
+
+    if (s.step === 'muf_avg') {
+      if (mufadalaYear() !== 2026) {
+        s.step = 'idle';
+        mufadalaComingSoon(msg.chat.id);
+        return;
+      }
+      if (!isNaN(num) && num >= 0 && num <= 100) {
+        s.avg = Math.round(num * 100) / 100;
+        mufadalaResult(msg.chat.id);
+      } else {
+        safeSend(msg.chat.id, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5).');
+      }
     }
+  } catch (err) {
+    console.error('message handler error:', err.message);
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 16) Polling error listener
+// ═══════════════════════════════════════════════════════════
+if (!RENDER_URL) {
+  bot.on('polling_error', (err) => {
+    console.error('Polling error:', err?.code, err?.message);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 17) Webhook / Express server
+// ═══════════════════════════════════════════════════════════
 if (RENDER_URL) {
-  // وضع السحابة: webhook — تيليغرام يرسل التحديثات إلى هذا العنوان
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '10kb' }));
   app.get('/', (req, res) => res.send('OK'));
   app.post(WEBHOOK_PATH, (req, res) => {
     try { bot.processUpdate(req.body); } catch (err) { console.error('webhook error:', err.message); }
@@ -688,9 +853,18 @@ if (RENDER_URL) {
   const PORT = process.env.PORT || 10000;
   app.listen(PORT, () => {
     const full = RENDER_URL.replace(/\/$/, '') + WEBHOOK_PATH;
-    bot.setWebHook(full).then(() => {
-      console.log('🤖 بوت مركز الطحان يعمل عبر webhook على Render...');
-    }).catch((err) => console.error('webhook set failed:', err.message));
+    // Retry setWebHook up to 3 times with backoff
+    let attempts = 0;
+    function trySetWebHook() {
+      attempts++;
+      bot.setWebHook(full).then(() => {
+        console.log(`🤖 بوت مركز الطحان يعمل عبر webhook على Render (attempt ${attempts})...`);
+      }).catch((err) => {
+        console.error(`webhook set failed (attempt ${attempts}):`, err.message);
+        if (attempts < 3) setTimeout(trySetWebHook, attempts * 5000);
+      });
+    }
+    trySetWebHook();
   });
 } else {
   console.log('🤖 بوت مركز الطحان يعمل محلياً عبر polling...');
