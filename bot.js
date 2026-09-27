@@ -844,7 +844,7 @@ bot.on('callback_query', async (cb) => {
     }
 
     // ---------- الأقسام الجديدة (routeSection) ----------
-    const SEC_PREFIXES = ['cmp:', 'crs:', 'vu:', 'oe:'];
+    const SEC_PREFIXES = ['cmp:', 'crs:', 'vu:', 'oe:', 'pt:'];
     if (SEC_PREFIXES.some((p) => data.startsWith(p))) {
       const io = { chatId, msgId, s, say: (t, kb) => safeEdit(chatId, msgId, t, { parse_mode: 'Markdown', ...(kb || {}) }) };
       if (routeSection(io, data)) return;

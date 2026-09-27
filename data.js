@@ -18,7 +18,11 @@ export {
   SVU_CENTER_COUNT,
   programsByLevel,
   findProgram,
-  SVU_SITE
+  SVU_SITE,
+  PT_QUIZZES,
+  PT_KEYS,
+  PT_QUESTION_COUNT,
+  ptLevelFor
 } from './data/virtual-u.js';
 
 export {
