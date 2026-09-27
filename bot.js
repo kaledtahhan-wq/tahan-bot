@@ -5,11 +5,14 @@ import {
   BRANCHES, CATEGORIES, QUESTIONS, MAJORS,
   MAJORS_2026, RELEASED_2026,
   EF_QUESTIONS, CEFR, EF_CATS, EF_SET_URL,
-  FAQ, CONTACT
+  FAQ, CONTACT, SPECS
 } from './data.js';
+import { routeSection, cmpShowSpec, cmpKeyboard } from './lib/sections.js';
+import { handleAi } from './lib/ai.js';
+import { addSubscriber, removeSubscriber, startBroadcast, stopBroadcast } from './lib/broadcast.js';
 
 // ═══════════════════════════════════════════════════════════
-// 1)amelioration handles & crash protection
+// 1) amelioration handles & crash protection
 // ═══════════════════════════════════════════════════════════
 process.on('unhandledRejection', (err) => {
   console.error('⚠️ Unhandled rejection:', err?.message || err);
@@ -37,6 +40,7 @@ const WEBHOOK_PATH = '/webhook/' + TOKEN;
 // ═══════════════════════════════════════════════════════════
 function shutdown(signal) {
   console.log(`🛑 Received ${signal}, shutting down gracefully...`);
+  try { stopBroadcast(); } catch (_) {}
   try { bot.stopPolling(); } catch (_) {}
   process.exit(0);
 }
@@ -54,7 +58,16 @@ function getSession(chatId) {
     sessions.set(chatId, {
       step: 'idle', section: null, avg: null,
       answers: [], efAnswers: [],
-      ts: Date.now()
+      // ─── حقول جديدة ───
+      mufYear: null,        // سنة المفاضلة النشطة (2025 / 2026)
+      aiOn: false,          // تشغيل المساعد الذكي
+      aiHistory: [],        // سياق المحادثة
+      sub: false,           // الاشتراك بالبث
+      cmpPick: null,        // التخصص الأول المختار
+      cmpList: null,        // القائمة المعروضة حالياً
+      cmpTitle: null,       // عنوان القائمة
+      cmpQuery: '',         // آخر بحث تخصص
+      cmpPage: 1            // صفحة القائمة
     });
   }
   const s = sessions.get(chatId);
@@ -62,7 +75,6 @@ function getSession(chatId) {
   return s;
 }
 
-// Clean expired sessions every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions) {
@@ -99,7 +111,6 @@ function safeEdit(chatId, msgId, text, opt) {
 // ═══════════════════════════════════════════════════════════
 // 7) Text helpers
 // ═══════════════════════════════════════════════════════════
-// Markdown v1 escaping: only _ * ` [ have special meaning
 function esc(text) {
   return String(text).replace(/([_*`\[])/g, '\\$1');
 }
@@ -112,16 +123,65 @@ function catIcon(catIdx) {
   return CATEGORIES[catIdx] ? CATEGORIES[catIdx].icon : '🎓';
 }
 
-// Truncate text to stay under Telegram's 4096 char limit
 function truncate(text, maxLen) {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 3) + '...';
 }
 
-// Handle Arabic comma (،) and Latin comma for number parsing
+// تحويل الأرقام العربية-الهندية والفارسية إلى لاتينية
+const AR_DIGITS = /[٠-٩۰-۹]/g;
+function toLatinDigits(text) {
+  return String(text).replace(AR_DIGITS, (d) => {
+    const c = d.codePointAt(0);
+    const base = c >= 0x06f0 ? 0x06f0 : 0x0660;
+    return String(c - base);
+  });
+}
+
+// استخراج أول رقم من نص قد يحتوي كلمات، وتوحيد الفواصل:
+// «معدلي 88.5» و«٨٨٫٥» و«88،5» كلها ⇒ 88.5
 function parseNum(text) {
-  const cleaned = text.replace(/،/g, '.').replace(/,/g, '.');
-  return parseFloat(cleaned);
+  const s = toLatinDigits(String(text))
+    .replace(/٫/g, '.')      // الفاصلة العشرية العربية
+    .replace(/٬/g, '')       // فاصل الآلاف العربي
+    .replace(/[،,]/g, '.')   // الفاصلة العربية/Latin — تُعامل كعشرية (88،5 = 88.5)
+    .replace(/(\d)\.(\d{3})(?!\d)/g, '$1$2'); // 1.200 ⇒ 1200
+  const m = s.match(/-?\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : NaN;
+}
+
+// غلاف موحّد يرسل عبر safeSend أو safeEdit حسب وجود msgId
+function ioWrap(chatId, s, msgId = null) {
+  return {
+    chatId,
+    msgId,
+    s,
+    say(text, kb) {
+      const opt = { parse_mode: 'Markdown', ...(kb || {}) };
+      if (msgId) return safeEdit(chatId, msgId, text, opt);
+      return safeSend(chatId, text, opt);
+    }
+  };
+}
+
+// بحث مرن: يتجاهل التشكيل والهمزات وأل التعريف وتكرار المسافات
+function searchSpecs(q, name) {
+  const norm = (t) =>
+    String(t)
+      .replace(/[ً-ْٰـ]/g, '')
+      .replace(/[أإآٱ]/g, 'ا')
+      .replace(/ى/g, 'ي')
+      .replace(/ة/g, 'ه')
+      .replace(/ؤ/g, 'و')
+      .replace(/ئ/g, 'ي')
+      .replace(/ء/g, '')
+      .replace(/\s+/g, '');
+  const nq = norm(q);
+  const nn = norm(name);
+  if (!nq) return false;
+  if (nn.includes(nq)) return true;
+  const k = Math.max(3, Math.ceil(nq.length * 0.6));
+  return nn.slice(0, k) === nq.slice(0, k);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -134,9 +194,10 @@ function mainKeyboard() {
         [{ text: '🧭 اختبار البوصلة', callback_data: 'start_quiz' }],
         [{ text: '📊 حاسبة المفاضلة', callback_data: 'start_muf' }],
         [{ text: '🔤 اختبار اللغة الإنكليزية (CEFR)', callback_data: 'start_ef' }],
-        [{ text: '🎓 الجامعة الافتراضية', callback_data: 'sec:vu' }, { text: '📚 التعليم المفتوح', callback_data: 'sec:oedu' }],
-        [{ text: '🆓 الدورات المجانية', callback_data: 'sec:fc' }, { text: '📘 منهاج البكلوريا', callback_data: 'sec:bac' }],
-        [{ text: '❓ الأسئلة الشائعة', callback_data: 'faq' }],
+        [{ text: '⚖️ مقارنة التخصصين', callback_data: 'cmp:' }, { text: '🎓 الجامعة الافتراضية', callback_data: 'vu:' }],
+        [{ text: '🆓 الدورات المجانية', callback_data: 'crs:' }, { text: '📚 التعليم المفتوح', callback_data: 'oe:' }],
+        [{ text: '🤖 المساعد الذكي', callback_data: 'ai_toggle' }, { text: '📢 الإشعارات', callback_data: 'sub' }],
+        [{ text: '📘 منهاج البكلوريا', callback_data: 'sec:bac' }, { text: '❓ الأسئلة الشائعة', callback_data: 'faq' }],
         [{ text: '📞 تواصل واستشارة', callback_data: 'contact' }, { text: 'ℹ️ عن المركز', callback_data: 'about' }]
       ]
     }
@@ -216,28 +277,33 @@ function homeBtn() {
   };
 }
 
+function aiToggleKeyboard(isOn) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: isOn ? '🔴 إيقاف المساعد' : '🟢 تشغيل المساعد', callback_data: 'ai_toggle' }],
+        [{ text: '🗑️ مسح المحادثة', callback_data: 'ai_clear' }],
+        [{ text: '🏠 الرئيسية', callback_data: 'home' }]
+      ]
+    }
+  };
+}
+
+function subKeyboard(isSub) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: isSub ? '🔕 إيقاف الإشعارات' : '🔔 استقبال الإشعارات', callback_data: 'sub_toggle' }],
+        [{ text: '🏠 الرئيسية', callback_data: 'home' }]
+      ]
+    }
+  };
+}
+
 // ═══════════════════════════════════════════════════════════
 // 9) Website sections
 // ═══════════════════════════════════════════════════════════
 const SECTIONS = {
-  vu: {
-    icon: '🎓',
-    title: 'الجامعة الافتراضية السورية',
-    desc: 'دليل شامل ومرجعي لبرامج الجامعة الافتراضية السورية (SVU): شروط القبول، المقررات، الرسوم الدراسية، ومراكز التسجيل المعتمدة — وتعرّف على التخصصات المتاحة وكيف تسجّل خطوة بخطوة.',
-    url: CONTACT.site + '/virtual-u.html'
-  },
-  oedu: {
-    icon: '📚',
-    title: 'التعليم المفتوح في سوريا',
-    desc: 'كل ما تحتاج معرفته عن نظام التعليم المفتوح: شروط القبول، التخصصات المتاحة، الرسوم، الجامعات المشاركة، والأسئلة الشائعة — بأسلوب مرجعي مبسّط.',
-    url: CONTACT.site + '/open-education.html'
-  },
-  fc: {
-    icon: '🆓',
-    title: 'الدورات المجانية',
-    desc: 'مجموعة دورات مجانية معتمدة في مجالات متنوعة (تنمية الذات، مهارات، لغات وتقنية) مع شهادات وودجت تسجيل عبر واتساب — ابدأ بأي دورة مجاناً.',
-    url: CONTACT.site + '/free-courses.html'
-  },
   bac: {
     icon: '📘',
     title: 'منهاج البكلوريا التفاعلي',
@@ -285,7 +351,6 @@ function computeResult(answers) {
   answers.forEach((w) => w.forEach((v, j) => { totals[j] += v; }));
   const sum = totals.reduce((a, b) => a + b, 0) || 1;
   const pcts = totals.map((t) => Math.round((t / sum) * 100));
-  // Stable sort: preserve original index for equal percentages
   const order = [0, 1, 2, 3, 4].sort((a, b) => pcts[b] - pcts[a] || a - b);
   return { totals, pcts, top: order[0], second: order[1] };
 }
@@ -310,6 +375,7 @@ function sendResult(chatId, msgId) {
   const r = computeResult(s.answers);
   const topCat = CATEGORIES[r.top];
   const secondCat = CATEGORIES[r.second];
+  const year = s.mufYear || 2025;
 
   let text = '';
   text += `🎉 **نتيجة اختبار البوصلة**\n\n`;
@@ -334,7 +400,7 @@ function sendResult(chatId, msgId) {
     }
   }
 
-  text += `\n_هذه نتيجة استرشادية لا تغني عن الاستشارة. أرصدة التخصصات المذكورة قيم تقريبية مبنية على مفاضلة ${mufadalaYear()} وتتغير سنوياً حسب النتيجة الرسمية._`;
+  text += `\n_هذه نتيجة استرشادية لا تغني عن الاستشارة. أرصدة التخصصات المذكورة قيم تقريبية مبنية على مفاضلة ${year} وتتغير سنوياً حسب النتيجة الرسمية._`;
 
   const opt = { parse_mode: 'Markdown', ...resultKeyboard() };
   if (msgId) {
@@ -348,7 +414,7 @@ function sendResult(chatId, msgId) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 11) Calculator
+// 11) Calculator — with independent year state
 // ═══════════════════════════════════════════════════════════
 function mufadalaYear() {
   return (RELEASED_2026 && Object.keys(MAJORS_2026).length > 0) ? 2026 : 2025;
@@ -379,6 +445,7 @@ function mufadalaComingSoon(chatId, msgId) {
 function startMufadala(chatId, msgId) {
   const s = getSession(chatId);
   if (mufadalaYear() === 2026) {
+    s.mufYear = 2026;
     s.section = null; s.avg = null; s.step = 'muf_section';
     const text = `📊 **حاسبة المفاضلة 2026**\n\nاختر فرعك الدراسي:`;
     if (msgId) {
@@ -387,13 +454,30 @@ function startMufadala(chatId, msgId) {
       safeSend(chatId, text, { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
     }
   } else {
-    mufadalaComingSoon(chatId, msgId);
+    // عرض قائمة اختيار السنة — 2025 متاح، 2026 قريباً
+    s.step = 'muf_year';
+    const text = `📊 **حاسبة المفاضلة**\n\nاختر السنة التي تريد الحساب عليها:`;
+    const opt = {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📊 حاسبة 2025 (متاح الآن)', callback_data: 'muf2025' }],
+          [{ text: '⏳ حاسبة 2026 (قريباً)', callback_data: 'muf2026info' }],
+          [{ text: '🏠 الرئيسية', callback_data: 'home' }]
+        ]
+      }
+    };
+    if (msgId) {
+      safeEdit(chatId, msgId, text, opt);
+    } else {
+      safeSend(chatId, text, opt);
+    }
   }
 }
 
 function mufadalaResult(chatId, msgId) {
   const s = getSession(chatId);
-  const year = mufadalaYear();
+  const year = s.mufYear || 2025;
   const src = year === 2026 ? MAJORS_2026 : MAJORS;
   const all = (src[s.section] || []).slice().sort((a, b) => b.cutoff - a.cutoff);
   const avail = all.filter((m) => m.cutoff <= s.avg);
@@ -404,7 +488,7 @@ function mufadalaResult(chatId, msgId) {
   text += `الفرع: **${esc(s.section)}** · معدلك: **${s.avg.toFixed(2)}%**\n\n`;
 
   if (avail.length === 0) {
-    text += `💪 لا تتوفر تخصصات جامعية ضمن هذا الفرع بمعدلك الحالي، لكن لا تقلق: تبقى خيارات المعاهد التقانية والتخصصات المفتوحة متاحة. تواصل معنا لاستشارة مجانية.\n`;
+    text += `💪 لا تتوفر تخصصات جامعية ضمن هذا الفرع بمعدلك الحالي، لكن لا تقلق: تبقى خيارات المعاهد التقنية والتخصصات المفتوحة متاحة. تواصل معنا لاستشارة مجانية.\n`;
   } else {
     text += `✅ **تخصصات متاحة لك (${avail.length}):**\n`;
     avail.forEach((m) => {
@@ -525,9 +609,9 @@ function efResult(chatId, msgId) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 13) Command handlers (wrapped with try/catch)
+// 13) Command handlers
 // ═══════════════════════════════════════════════════════════
-bot.onText(/\/start/, (msg) => {
+bot.onText(/^\/start/, (msg) => {
   try {
     const chatId = msg.chat.id;
     const s = getSession(chatId);
@@ -539,11 +623,12 @@ bot.onText(/\/start/, (msg) => {
       + `🧭 اختبار البوصلة لاكتشاف تخصصك الجامعي\n`
       + `📊 حاسبة المفاضلة حسب فرعك ومعدلك\n`
       + `🔤 اختبار اللغة الإنكليزية (مقياس CEFR)\n`
+      + `⚖️ مقارنة التخصصين جنباً إلى جنب\n`
       + `🎓 الجامعة الافتراضية — دليل البرامج والقبول\n`
       + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
       + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
-      + `📘 منهاج البكلوريا التفاعلي\n`
-      + `❓ الأسئلة الشائعة والاستشارة المجانية\n\nاختر ما يناسبك 👇`,
+      + `🤖 المساعد الذكي لأسئلتك الفورية\n`
+      + `📢 إشعارات الإعلانات الجديدة\n\nاختر ما يناسبك 👇`,
       { parse_mode: 'Markdown', ...mainKeyboard() }
     );
   } catch (err) {
@@ -551,11 +636,11 @@ bot.onText(/\/start/, (msg) => {
   }
 });
 
-bot.onText(/\/help/, (msg) => {
+bot.onText(/^\/help/, (msg) => {
   try {
     safeSend(
       msg.chat.id,
-      `**الأوامر المتاحة:**\n/start — الصفحة الرئيسية\n/quiz — اختبار البوصلة\n/mufadala — حاسبة المفاضلة\n/english — اختبار اللغة الإنكليزية\n/faq — الأسئلة الشائعة\n/contact — التواصل والاستشارة`,
+      `**الأوامر المتاحة:**\n/start — الصفحة الرئيسية\n/quiz — اختبار البوصلة\n/mufadala — حاسبة المفاضلة\n/english — اختبار اللغة الإنكليزية\n/compare — مقارنة التخصصين\n/courses — الدورات المجانية\n/vu — الجامعة الافتراضية\n/openedu — التعليم المفتوح\n/ai — المساعد الذكي\n/subscribe — استقبال الإشعارات\n/unsubscribe — إيقاف الإشعارات\n/faq — الأسئلة الشائعة\n/contact — التواصل والاستشارة`,
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
@@ -563,7 +648,7 @@ bot.onText(/\/help/, (msg) => {
   }
 });
 
-bot.onText(/\/quiz/, (msg) => {
+bot.onText(/^\/quiz/, (msg) => {
   try {
     const chatId = msg.chat.id;
     const s = getSession(chatId);
@@ -578,7 +663,7 @@ bot.onText(/\/quiz/, (msg) => {
   }
 });
 
-bot.onText(/\/mufadala/, (msg) => {
+bot.onText(/^\/mufadala/, (msg) => {
   try {
     startMufadala(msg.chat.id);
   } catch (err) {
@@ -586,7 +671,7 @@ bot.onText(/\/mufadala/, (msg) => {
   }
 });
 
-bot.onText(/\/english/, (msg) => {
+bot.onText(/^\/english/, (msg) => {
   try {
     const chatId = msg.chat.id;
     const s = getSession(chatId);
@@ -604,7 +689,106 @@ bot.onText(/\/english/, (msg) => {
   }
 });
 
-bot.onText(/\/faq/, (msg) => {
+bot.onText(/^\/compare/, (msg) => {
+  try {
+    const s = getSession(msg.chat.id);
+    routeSection({ chatId: msg.chat.id, msgId: null, s, say: (t, kb) => safeSend(msg.chat.id, t, { parse_mode: 'Markdown', ...(kb || {}) }) }, 'cmp:');
+  } catch (err) {
+    console.error('/compare error:', err.message);
+  }
+});
+
+bot.onText(/^\/courses/, (msg) => {
+  try {
+    const s = getSession(msg.chat.id);
+    routeSection({ chatId: msg.chat.id, msgId: null, s, say: (t, kb) => safeSend(msg.chat.id, t, { parse_mode: 'Markdown', ...(kb || {}) }) }, 'crs:');
+  } catch (err) {
+    console.error('/courses error:', err.message);
+  }
+});
+
+bot.onText(/^\/vu/, (msg) => {
+  try {
+    const s = getSession(msg.chat.id);
+    routeSection({ chatId: msg.chat.id, msgId: null, s, say: (t, kb) => safeSend(msg.chat.id, t, { parse_mode: 'Markdown', ...(kb || {}) }) }, 'vu:');
+  } catch (err) {
+    console.error('/vu error:', err.message);
+  }
+});
+
+bot.onText(/^\/openedu/, (msg) => {
+  try {
+    const s = getSession(msg.chat.id);
+    routeSection({ chatId: msg.chat.id, msgId: null, s, say: (t, kb) => safeSend(msg.chat.id, t, { parse_mode: 'Markdown', ...(kb || {}) }) }, 'oe:');
+  } catch (err) {
+    console.error('/openedu error:', err.message);
+  }
+});
+
+bot.onText(/^\/ai\b/, (msg) => {
+  try {
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
+    s.aiOn = true;
+    const text = s.aiHistory.length
+      ? '🤖 المساعد الذكي **مُفعَّل** — تابع سؤالك 👇'
+      : '🤖 **تم تشغيل المساعد الذكي** ✨\n\nاكتب سؤالك مباشرة وسأجيبك فوراً. أمثلة:\n'
+        + '• «كيف أسجّل بالجامعة الافتراضية؟»\n'
+        + '• «ما شروط القبول بالتعليم المفتوح؟»\n'
+        + '• «كم رسوم الدورات؟»\n'
+        + '• «قارن بين الطب والحاسوب»\n\n'
+        + 'لإيقافه: /ai_off — لمسح المحادثة: /ai_clear';
+    safeSend(chatId, text, { parse_mode: 'Markdown', ...aiToggleKeyboard(true) });
+  } catch (err) {
+    console.error('/ai error:', err.message);
+  }
+});
+
+bot.onText(/^\/ai_off/, (msg) => {
+  try {
+    const s = getSession(msg.chat.id);
+    s.aiOn = false;
+    safeSend(msg.chat.id, '🔴 تم إيقاف المساعد الذكي.\n\nيمكنك إعادة تشغيله بـ /ai', { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('/ai_off error:', err.message);
+  }
+});
+
+bot.onText(/^\/ai_clear/, (msg) => {
+  try {
+    const s = getSession(msg.chat.id);
+    s.aiHistory = [];
+    safeSend(msg.chat.id, '🗑️ تم مسح سياق المحادثة. ابدأ من جديد!', { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('/ai_clear error:', err.message);
+  }
+});
+
+bot.onText(/^\/subscribe/, async (msg) => {
+  try {
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
+    await addSubscriber(chatId);
+    s.sub = true;
+    safeSend(chatId, '🔔 **تم تفعيل الإشعارات** ✅\n\nستصلك هنا كل الإعلانات الجديدة من المركز تلقائياً.\n\nلإيقافها اضغط /unsubscribe', { parse_mode: 'Markdown', ...subKeyboard(true) });
+  } catch (err) {
+    console.error('/subscribe error:', err.message);
+  }
+});
+
+bot.onText(/^\/unsubscribe/, async (msg) => {
+  try {
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
+    await removeSubscriber(chatId);
+    s.sub = false;
+    safeSend(chatId, '🔕 **تم إيقاف الإشعارات**\n\nلن تصلك إعلانات جديدة. لإعادة التفعيل: /subscribe', { parse_mode: 'Markdown', ...subKeyboard(false) });
+  } catch (err) {
+    console.error('/unsubscribe error:', err.message);
+  }
+});
+
+bot.onText(/^\/faq/, (msg) => {
   try {
     safeSend(
       msg.chat.id,
@@ -616,7 +800,7 @@ bot.onText(/\/faq/, (msg) => {
   }
 });
 
-bot.onText(/\/contact/, (msg) => {
+bot.onText(/^\/contact/, (msg) => {
   try {
     safeSend(
       msg.chat.id,
@@ -638,7 +822,6 @@ bot.on('callback_query', async (cb) => {
   const data = cb.data || '';
   if (!chatId || !msgId) return;
 
-  // Debounce: prevent double-click
   if (!acquireLock(chatId)) {
     bot.answerCallbackQuery(cb.id).catch(() => {});
     return;
@@ -654,10 +837,17 @@ bot.on('callback_query', async (cb) => {
       return;
     }
 
-    // ---------- أقسام الموقع ----------
+    // ---------- أقسام الموقع (legacy) ----------
     if (data.startsWith('sec:')) {
       sendSection(chatId, msgId, data.split(':')[1]);
       return;
+    }
+
+    // ---------- الأقسام الجديدة (routeSection) ----------
+    const SEC_PREFIXES = ['cmp:', 'crs:', 'vu:', 'oe:'];
+    if (SEC_PREFIXES.some((p) => data.startsWith(p))) {
+      const io = { chatId, msgId, s, say: (t, kb) => safeEdit(chatId, msgId, t, { parse_mode: 'Markdown', ...(kb || {}) }) };
+      if (routeSection(io, data)) return;
     }
 
     // ---------- البوصلة ----------
@@ -669,7 +859,7 @@ bot.on('callback_query', async (cb) => {
     if (data.startsWith('qbranch:')) {
       s.section = data.split(':')[1];
       s.step = 'quiz_avg';
-      await safeEdit(chatId, msgId, `فرعك: **${esc(s.section)}**\n\nإذا كنت تعرف معدلك، اكتبه رقماً (مثال: 88.5) — أو اضغط تخطي إذا لم تكن متأكداً.`, { parse_mode: 'Markdown', ...avgKeyboard() });
+      await safeEdit(chatId, msgId, `فرعك: **${esc(s.section)}**\n\nإذا كنت تعرف معدلك، اكتبه رقماً (مثال: 88.5) — أو اضبط تخطي إذا لم تكن متأكداً.`, { parse_mode: 'Markdown', ...avgKeyboard() });
       return;
     }
     if (data === 'avg_skip') {
@@ -695,8 +885,13 @@ bot.on('callback_query', async (cb) => {
       return;
     }
     if (data === 'muf2025') {
+      s.mufYear = 2025;
       s.section = null; s.avg = null; s.step = 'muf_section';
       await safeEdit(chatId, msgId, '📊 **حاسبة المفاضلة 2025**\n\nاختر فرعك الدراسي:', { parse_mode: 'Markdown', ...branchKeyboard('mbranch') });
+      return;
+    }
+    if (data === 'muf2026info') {
+      mufadalaComingSoon(chatId, msgId);
       return;
     }
     if (data.startsWith('mbranch:')) {
@@ -741,6 +936,36 @@ bot.on('callback_query', async (cb) => {
       return;
     }
 
+    // ---------- المساعد الذكي ----------
+    if (data === 'ai_toggle') {
+      s.aiOn = !s.aiOn;
+      if (s.aiOn) {
+        await safeEdit(chatId, msgId, '🤖 **تم تشغيل المساعد الذكي** ✨\n\nاكتب سؤالك مباشرة وسأجيبك فوراً.\n\nلإيقافه: /ai_off — لمسح المحادثة: /ai_clear', { parse_mode: 'Markdown', ...aiToggleKeyboard(true) });
+      } else {
+        await safeEdit(chatId, msgId, '🔴 تم إيقاف المساعد الذكي.\n\nيمكنك إعادة تشغيله بالأمر /ai', { parse_mode: 'Markdown', ...aiToggleKeyboard(false) });
+      }
+      return;
+    }
+    if (data === 'ai_clear') {
+      s.aiHistory = [];
+      await safeEdit(chatId, msgId, '🗑️ تم مسح سياق المحادثة. ابدأ من جديد!', { parse_mode: 'Markdown', ...aiToggleKeyboard(s.aiOn) });
+      return;
+    }
+
+    // ---------- الإشعارات ----------
+    if (data === 'sub' || data === 'sub_toggle') {
+      // 'sub' = تفعيل مباشر من القائمة الرئيسية، 'sub_toggle' = تبديل الحالة
+      s.sub = data === 'sub' ? true : !s.sub;
+      if (s.sub) {
+        await addSubscriber(chatId);
+        await safeEdit(chatId, msgId, '🔔 **تم تفعيل الإشعارات** ✅\n\nستصلك هنا كل الإعلانات الجديدة من المركز تلقائياً.\n\nلإيقافها اضغط /unsubscribe', { parse_mode: 'Markdown', ...subKeyboard(true) });
+      } else {
+        await removeSubscriber(chatId);
+        await safeEdit(chatId, msgId, '🔕 **تم إيقاف الإشعارات**\n\nلن تصلك إعلانات جديدة. لإعادة التفعيل: /subscribe', { parse_mode: 'Markdown', ...subKeyboard(false) });
+      }
+      return;
+    }
+
     // ---------- الأسئلة الشائعة ----------
     if (data === 'faq') {
       await safeEdit(chatId, msgId, '❓ **الأسئلة الشائعة**\n\nاختر سؤالاً:', { parse_mode: 'Markdown', ...faqKeyboard() });
@@ -771,10 +996,12 @@ bot.on('callback_query', async (cb) => {
         + `🧭 اختبار البوصلة لتحديد قطبك المناسب\n`
         + `📊 حاسبة مفاضلة 2025 (و2026 فور صدورها)\n`
         + `🔤 اختبار اللغة الإنكليزية + شهادة EF SET معتمدة\n`
+        + `⚖️ مقارنة التخصصين جنباً إلى جنب\n`
         + `🎓 الجامعة الافتراضية — دليل شامل لبرامج SVU والقبول\n`
         + `📚 التعليم المفتوح — شروطه وتخصصاته ورسومه\n`
         + `🆓 الدورات المجانية — دورات معتمدة مجاناً\n`
-        + `📘 منهاج البكلوريا التفاعلي لتنظيم المذاكرة\n\n`
+        + `🤖 المساعد الذكي لأسئلتك الفورية\n`
+        + `📘 منهاج البكلوريا التفاعلي\n\n`
         + `كل الخدمات مجانية — صدقة جارية. 🌿\n\n`
         + `الموقع: ${CONTACT.site}`,
         { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🌐 افتح الموقع', url: CONTACT.site }], [{ text: '🏠 الرئيسية', callback_data: 'home' }]] } }
@@ -790,40 +1017,78 @@ bot.on('callback_query', async (cb) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 15) Message handler (average input)
+// 15) Message handler
 // ═══════════════════════════════════════════════════════════
 bot.on('message', (msg) => {
   try {
     if (!msg.text) return;
     if (msg.text.startsWith('/')) return;
-    const s = getSession(msg.chat.id);
+    const chatId = msg.chat.id;
+    const s = getSession(chatId);
     const num = parseNum(msg.text);
 
+    // ① اختبار البوصلة — إدخال المعدل
     if (s.step === 'quiz_avg') {
       if (!isNaN(num) && num >= 0 && num <= 100) {
         s.avg = Math.round(num * 100) / 100;
         s.answers = [];
         s.step = 'quiz_q';
-        safeSend(msg.chat.id, `معدلك: **${s.avg}%** 🎯\n\nأجب بصدق على الأسئلة التالية:`, { parse_mode: 'Markdown' });
-        askQuestion(msg.chat.id);
+        safeSend(chatId, `معدلك: **${s.avg}%** 🎯\n\nأجب بصدق على الأسئلة التالية:`, { parse_mode: 'Markdown' });
+        askQuestion(chatId);
       } else {
-        safeSend(msg.chat.id, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5)، أو اضغط «تخطي».');
+        safeSend(chatId, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5)، أو اضغط «تخطي».');
       }
       return;
     }
 
+    // ② المفاضلة — اختيار السنة عبر نص (لا أزرار)
+    if (s.step === 'muf_year') {
+      s.step = 'idle';
+      ioWrap(chatId, s).say('👌 اختار السنة من الأزرار أعلاه: **2025** متاحة الآن، و**2026** ستُفعَّل فور صدور النتائج الرسمية.', mainKeyboard());
+      return;
+    }
+
+    // ③ المفاضلة — إدخال المعدل (سنة مستقلة، لا فحص mufadalaYear)
     if (s.step === 'muf_avg') {
-      if (mufadalaYear() !== 2026) {
-        s.step = 'idle';
-        mufadalaComingSoon(msg.chat.id);
-        return;
-      }
       if (!isNaN(num) && num >= 0 && num <= 100) {
         s.avg = Math.round(num * 100) / 100;
-        mufadalaResult(msg.chat.id);
+        mufadalaResult(chatId);
       } else {
-        safeSend(msg.chat.id, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5).');
+        safeSend(chatId, 'لم أفهم هذا الرقم 🤔\nاكتب معدلك رقماً بين 0 و 100 (مثال: 88.5).');
       }
+      return;
+    }
+
+    // ④ المقارنة — إدخال اسم التخصص للبحث
+    if (s.step === 'cmp_search') {
+      const q = msg.text.trim();
+      s.cmpQuery = q;
+      s.step = 'idle';
+      // مطابقة دقيقة ← تضمين ← مرنة (تشابه الحروف والتشكيل)
+      const found =
+        SPECS.find((x) => x.n === q) ||
+        SPECS.find((x) => x.n.includes(q)) ||
+        SPECS.find((x) => q.includes(x.n)) ||
+        SPECS.find((x) => searchSpecs(q, x.n)) ||
+        null;
+      const io = ioWrap(chatId, s);
+      if (found) {
+        s.cmpList = [found];
+        s.cmpTitle = 'نتيجة البحث';
+        s.cmpPage = 1;
+        cmpShowSpec(io, found.n);
+      } else {
+        io.say(`🔍 ما لقيت «${q}» 🤔\n\nجرّب كلمة أقصر، أو تصفّح الدليل حسب المجال.`, cmpKeyboard());
+      }
+      return;
+    }
+
+    // ⑤ المساعد الذكي
+    if (s.aiOn) {
+      handleAi(chatId, s, msg.text, (cid, t) => safeSend(cid, t, { parse_mode: 'Markdown' })).catch((err) =>
+        console.error('ai error:', err?.message)
+      );
+      return;
     }
   } catch (err) {
     console.error('message handler error:', err.message);
@@ -853,7 +1118,6 @@ if (RENDER_URL) {
   const PORT = process.env.PORT || 10000;
   app.listen(PORT, () => {
     const full = RENDER_URL.replace(/\/$/, '') + WEBHOOK_PATH;
-    // Retry setWebHook up to 3 times with backoff
     let attempts = 0;
     function trySetWebHook() {
       attempts++;
@@ -869,5 +1133,10 @@ if (RENDER_URL) {
 } else {
   console.log('🤖 بوت مركز الطحان يعمل محلياً عبر polling...');
 }
+
+// ═══════════════════════════════════════════════════════════
+// 18) بث الإعلانات
+// ═══════════════════════════════════════════════════════════
+startBroadcast(bot).catch?.((err) => console.error('broadcast start failed:', err?.message));
 
 export { bot };

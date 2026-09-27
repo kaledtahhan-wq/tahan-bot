@@ -5,11 +5,35 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: node bot.js
+    healthCheckPath: /
     envVars:
+      # ─── إلزامي ───
       - key: BOT_TOKEN
         sync: false
       - key: WHATSAPP_NUMBER
         sync: false
+
+      # ─── المساعد الذكي (اختياري: بدونه يعمل المحرك المحلي) ───
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: AI_MODEL
+        value: gpt-4o-mini
+      - key: AI_TIMEOUT_MS
+        value: "20000"
+
+      # ─── البث والإشعارات (اختياري: بدونه ذاكرة محلية فقط) ───
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: ANNOUNCEMENT_URL
+        value: https://altahhan.vercel.app/api/announcement
+      - key: ANNOUNCE_POLL_MS
+        value: "300000"
+
+      # ─── رابط الخدمة (يستخدمه Render تلقائياً) ───
       - key: RENDER_EXTERNAL_URL
         fromService:
           type: web
