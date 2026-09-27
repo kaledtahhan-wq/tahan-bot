@@ -42,6 +42,7 @@ export const COURSES = [
     plat: "تجربة شخصية",
     desc: "تجربة شاملة للتحضير لاختبار Duolingo English Test من الصفر: شرح مكوّنات الاختبار، ملفات تدريب ومصادر دراسية، ومخطط تنظيمي للاجتياز.",
     url: "https://academy.syrian-youth.org/blog/sdetc/",
+    note: "مجاني ويغطي مصاريف الامتحان المقدرة بـ 59 دولار أمريكي.",
     extra: [{"url":"https://docs.google.com/forms/d/e/1FAIpQLSeIKW00VmIl5XUzrCa2LGgHeueC7-05BZAHn5O5kCV9Qs7W2g/viewform","cta":"زر اختبار Duolingo English Test"}]
   },
   {
@@ -182,8 +183,11 @@ export const COURSES = [
     name: "توثيق حساب كورسيرا",
     plat: "أكاديمية تجمع الشباب السوري",
     desc: "خدمة مهمة لتوثيق هوية حسابك على منصة كورسيرا والحصول على شهاداتها المعتمدة مجاناً، للسوريين والسودانيين واللاجئين الذين لا يستطيعون التوثيق بشكل فردي.",
-    url: "tel:+963947627404",
-    extra: [{"url":"https://docs.google.com/forms/d/e/1FAIpQLSfrKYLaFjhijaPE6V4A9E168oKpJhPuSfS0h8eEAOVIaw45eA/viewform?fbclid=IwAR3sweUno2PjgpGzpqJS5MmCvWI4LHpQYsnQ_3epmNbo6o6fKtweeXDP8gs","cta":"توثيق ID Verification - Coursera"},{"url":"https://academy.syrian-youth.org/blog/coursera-id-verification/","cta":"اقرأ التفاصيل الكاملة"},{"url":"https://wa.me/963999278956","cta":"راسلنا على واتساب"},{"url":"index.html","cta":"🏠 الرئيسية"},{"url":"calculator.html","cta":"🧮 المفاضلة"},{"url":"virtual-u.html","cta":"🏛 الجامعة الافتراضية"},{"url":"open-education.html","cta":"📖 التعليم المفتوح"},{"url":"english.html","cta":"🌐 تعلم الإنكليزية"},{"url":"free-courses.html","cta":"🎓 الدورات المجانية"},{"url":"faq.html","cta":"❓ الأسئلة الشائعة"},{"url":"index.html#contact","cta":"📞 تواصل معنا"},{"url":"index.html","cta":"الرئيسية"},{"url":"calculator.html","cta":"المفاضلة"},{"url":"quiz.html","cta":"بوصلة الميول"},{"url":"virtual-u.html","cta":"الجامعة الافتراضية"},{"url":"open-education.html","cta":"التعليم المفتوح"},{"url":"free-courses.html","cta":"الدورات المجانية"},{"url":"english.html","cta":"تعلم الإنكليزية"},{"url":"faq.html","cta":"الأسئلة الشائعة"},{"url":"privacy.html","cta":"سياسة الخصوصية"},{"url":"terms.html","cta":"الشروط والأحكام"},{"url":"#","cta":"تفعيل الإشعارات"},{"url":"index.html#about","cta":"من نحن"},{"url":"https://t.me/AlTahhanCenter","cta":""},{"url":"https://www.instagram.com/altahhan_center","cta":""},{"url":"https://wa.me/963999278956","cta":""},{"url":"https://www.facebook.com/al.tahhancenter","cta":""}]
+    url: "https://academy.syrian-youth.org/blog/coursera-id-verification/",
+    note: "ليست دورة — خدمة توثيق مجانية لطلاب منحة كورسيرا. تصل مدتها إلى 3 أسابيع كحد أقصى.",
+    extra: [
+      { url: "https://docs.google.com/forms/d/e/1FAIpQLSfrKYLaFjhijaPE6V4A9E168oKpJhPuSfS0h8eEAOVIaw45eA/viewform", cta: "توثيق ID Verification - Coursera" }
+    ]
   }
 ];
 
