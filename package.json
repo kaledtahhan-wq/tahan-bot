@@ -10,6 +10,7 @@
     "test:guards": "node tests/guards.mjs",
     "test:pt": "node --import ./tests/register.mjs tests/pt-quiz.mjs",
     "test:links": "node --import ./tests/register.mjs tests/links.mjs",
+    "test:version": "node --import ./tests/register.mjs tests/version.mjs",
     "check": "node --check bot.js && node --check data.js"
   },
   "dependencies": {

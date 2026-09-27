@@ -5,7 +5,8 @@ import {
   BRANCHES, CATEGORIES, QUESTIONS, MAJORS,
   MAJORS_2026, RELEASED_2026,
   EF_QUESTIONS, CEFR, EF_CATS, EF_SET_URL,
-  FAQ, CONTACT, SPECS
+  FAQ, CONTACT, SPECS,
+  COURSE_COUNT, SVU_PROGRAMS, PT_QUESTION_COUNT
 } from './data.js';
 import { routeSection, cmpShowSpec, cmpKeyboard } from './lib/sections.js';
 import { handleAi } from './lib/ai.js';
@@ -1111,6 +1112,21 @@ if (RENDER_URL) {
   const app = express();
   app.use(express.json({ limit: '10kb' }));
   app.get('/', (req, res) => res.send('OK'));
+  // تُظهر أي نسخة مبنية فعلاً — RENDER_GIT_COMMIT يضعه Render تلقائياً
+  app.get('/version', (req, res) => {
+    res.json({
+      ok: true,
+      commit: process.env.RENDER_GIT_COMMIT || 'unknown',
+      branch: process.env.RENDER_GIT_BRANCH || 'unknown',
+      builtAt: process.env.RENDER_GIT_COMMIT_DATE || 'unknown',
+      features: {
+        placementQuiz: PT_QUESTION_COUNT,
+        courses: COURSE_COUNT,
+        specs: SPECS.length,
+        programs: SVU_PROGRAMS.length
+      }
+    });
+  });
   app.post(WEBHOOK_PATH, (req, res) => {
     try { bot.processUpdate(req.body); } catch (err) { console.error('webhook error:', err.message); }
     res.sendStatus(200);
