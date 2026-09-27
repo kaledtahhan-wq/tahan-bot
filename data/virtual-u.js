@@ -14,7 +14,7 @@ export const SVU_LEVELS = [
 export const SVU_PROGRAMS = [
   {
     code: "TIC",
-    name: "المعهد التقني للحاسوب",
+    name: "المعهد التقاني للحاسوب",
     level: "معهد",
     specs: "برمجيات ونظم المعلومات",
     duration: "سنتان",
@@ -27,7 +27,7 @@ export const SVU_PROGRAMS = [
   },
   {
     code: "TIBA",
-    name: "المعهد التقني لإدارة الأعمال",
+    name: "المعهد التقاني لإدارة الأعمال",
     level: "معهد",
     specs: "تسويق، موارد بشرية، مالية ومصارف",
     duration: "سنتان",
@@ -40,7 +40,7 @@ export const SVU_PROGRAMS = [
   },
   {
     code: "TITH",
-    name: "المعهد التقني للعلوم السياحية والفندقية",
+    name: "المعهد التقاني للعلوم السياحية والفندقية",
     level: "معهد",
     specs: "إدارة سياحية، فندقية، تسويق سياحي",
     duration: "سنتان",
@@ -53,7 +53,7 @@ export const SVU_PROGRAMS = [
   },
   {
     code: "TIEMD",
-    name: "المعهد التقني للإدارة الهندسية والرقمنة",
+    name: "المعهد التقاني للإدارة الهندسية والرقمنة",
     level: "معهد",
     specs: "إدارة مشاريع هندسية، نمذجة معمارية وإنشائية",
     duration: "سنتان",
@@ -66,7 +66,7 @@ export const SVU_PROGRAMS = [
   },
   {
     code: "TII",
-    name: "المعهد التقني للابتكار",
+    name: "المعهد التقاني للابتكار",
     level: "معهد",
     specs: "ابتكار رقمي، ريادة أعمال تقنية",
     duration: "سنتان",
@@ -79,7 +79,7 @@ export const SVU_PROGRAMS = [
   },
   {
     code: "TIIS",
-    name: "المعهد التقني للابتكار الصناعي",
+    name: "المعهد التقاني للابتكار الصناعي",
     level: "معهد",
     specs: "ابتكار صناعي، صناعة متقدمة",
     duration: "سنتان",
