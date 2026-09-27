@@ -5,7 +5,12 @@
   "type": "module",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "test": "node --import ./tests/register.mjs tests/run.mjs",
+    "test:guards": "node tests/guards.mjs",
+    "test:pt": "node --import ./tests/register.mjs tests/pt-quiz.mjs",
+    "test:links": "node --import ./tests/register.mjs tests/links.mjs",
+    "check": "node --check bot.js && node --check data.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
