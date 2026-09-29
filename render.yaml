@@ -12,6 +12,9 @@ services:
         sync: false
       - key: WHATSAPP_NUMBER
         sync: false
+      # سرّ التحقق من الطلبات — 1-16 حرفاً (A-Z a-z 0-9 _ -)
+      - key: WEBHOOK_SECRET
+        sync: false
 
       # ─── المساعد الذكي (اختياري: بدونه يعمل المحرك المحلي) ───
       - key: AI_API_KEY

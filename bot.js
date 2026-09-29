@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import TelegramBot from 'node-telegram-bot-api';
 import express from 'express';
+import crypto from 'crypto';
 import {
   BRANCHES, CATEGORIES, QUESTIONS, MAJORS,
   MAJORS_2026, RELEASED_2026,
@@ -34,7 +35,8 @@ if (!TOKEN) {
 const WHATSAPP = process.env.WHATSAPP_NUMBER || CONTACT.whatsapp;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 const bot = new TelegramBot(TOKEN, { polling: !RENDER_URL });
-const WEBHOOK_PATH = '/webhook/' + TOKEN;
+const WEBHOOK_SECRET = (process.env.WEBHOOK_SECRET || crypto.randomBytes(8).toString('hex')).slice(0, 16);
+const WEBHOOK_PATH = '/webhook';
 
 // ═══════════════════════════════════════════════════════════
 // 3) Graceful shutdown
@@ -1128,6 +1130,11 @@ if (RENDER_URL) {
     });
   });
   app.post(WEBHOOK_PATH, (req, res) => {
+    const got = req.get('X-Telegram-Bot-Api-Secret-Token') || '';
+    const a = Buffer.from(String(got));
+    const b = Buffer.from(String(WEBHOOK_SECRET));
+    const ok = a.length === b.length && (a.length === 0 || crypto.timingSafeEqual(a, b));
+    if (!ok) { res.sendStatus(403); return; }
     try { bot.processUpdate(req.body); } catch (err) { console.error('webhook error:', err.message); }
     res.sendStatus(200);
   });
@@ -1137,8 +1144,10 @@ if (RENDER_URL) {
     let attempts = 0;
     function trySetWebHook() {
       attempts++;
-      bot.setWebHook(full).then(() => {
+      bot.setWebHook(full, { secret_token: WEBHOOK_SECRET }).then(() => {
         console.log(`🤖 بوت مركز الطحان يعمل عبر webhook على Render (attempt ${attempts})...`);
+        console.log(`   path: ${WEBHOOK_PATH} | secret: محمي (${WEBHOOK_SECRET.length} chars)`);
+        if (!/^[A-Za-z0-9_-]{1,16}$/.test(WEBHOOK_SECRET)) console.error('WEBHOOK_SECRET خارج النطاق المسموح به من تيليجرام');
       }).catch((err) => {
         console.error(`webhook set failed (attempt ${attempts}):`, err.message);
         if (attempts < 3) setTimeout(trySetWebHook, attempts * 5000);

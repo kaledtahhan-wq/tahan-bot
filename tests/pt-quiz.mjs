@@ -47,7 +47,7 @@ for (let m = 0; m < PT_KEYS.length; m++) {
   ok(/مستوى متقدم/.test(last.text), `${PT_KEYS[m]}: المستوى متقدم`);
 }
 
-// ---------- 2) لعب النموذج 2全是 خطأ → 0% ----------
+// ---------- 2) لعب النموذج 2 خطأ كامل → 0% ----------
 {
   const m = 1, model = PT_QUIZZES[PT_KEYS[m]], total = model.data.length;
   await runCb('pt:s' + m);
@@ -109,7 +109,7 @@ for (let m = 0; m < PT_KEYS.length; m++) {
   ok(bad.length === 0, 'كل callback_data في الاختبار ≤ 64 بايت', bad.join(','));
 }
 
-// ---------- 7) لوحات المفاتيح全程 ----------
+// ---------- 7) لوحات المفاتيح بالكامل ----------
 // كل رسالة في هذه المجموعة مرّت عبر المحاكي، وهو يرصد الصفوف غير المسطّحة
 ok(kbProblems.length === 0, `محاكي تيليغرام: 0 لوحة مشوّهة خلال 156 سؤالاً (${kbProblems.length})`);
 kbProblems.slice(0, 8).forEach((b) => console.log('   ✗ ' + b));
